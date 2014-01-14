@@ -1,0 +1,34 @@
+<?php
+/**
+ * Implements hook_permission
+ */
+function heart_search_theme(){
+  $path = drupal_get_path('module','heart_search').'/templates';
+  $theme = array();
+  $theme['search_form'] = array(
+    'render element' => 'form',
+    'template' => 'search_form',
+    'path' => $path,
+  );
+  
+  return $theme;
+}
+
+function heart_search_form_alter(&$form,&$form_state,$form_id){
+  if($form_id=='search_block_form'){
+    $form['basic']['keys']['#default_value'] = '12';
+    $form['basic']['keys']['#value'] = '12';
+    $form['#validate'] = array('search_block_form_validate');
+    drupal_add_css(drupal_get_path('module','heart_search').'/css/heart_search.css');
+    drupal_add_js(drupal_get_path('module','heart_search').'/js/heart_search.js');
+    $form['search_block_form']['#default_value'] = arg(2) ? check_plain(arg(2)) : '请输入关键字';
+    $form['search_block_form']['#attributes']['class'][]='input_152';
+    $form['actions']['submit']['#attributes']['class'][]='top_ss_btn';
+  }
+}
+
+function search_block_form_validate($form,&$form_state){
+  if(trim($form_state['values']['search_block_form'])=='' || trim($form_state['values']['search_block_form']=='请输入关键字')){
+    form_set_error('search_block_form','对不起，请输入关键字！');
+  }
+}  

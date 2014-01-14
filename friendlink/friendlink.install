@@ -1,0 +1,102 @@
+<?php
+function friendlink_install() {
+ 
+  // Ensure the forum node type is available.
+  node_types_rebuild();
+  // $types = node_type_get_types();
+  // node_add_body_field($types['friendlink']);
+ 
+  foreach (_friendlink_installed_fields() as $field) {
+    field_create_field($field);
+  }
+ 
+  foreach (_friendlink_installed_instances() as $instance) {
+    field_create_instance($instance);
+  }
+ 
+}
+
+function _friendlink_installed_fields() {
+  $t = get_t();
+  return array(
+    'field_friendlink_link' => array(
+      'field_name' => 'field_friendlink_link',
+      'cardinality' => 1,
+      'type'        => 'link_field',
+    ),
+    'field_friendlink_weight' => array(
+      'field_name' => 'field_friendlink_weight',
+      'cardinality' => 1,
+      'type'        => 'number_integer',
+    ),
+   );
+ 
+}
+function _friendlink_installed_instances() {
+  $t = get_t();
+  return array( 
+   'field_friendlink_link' => array(
+      'field_name' => 'field_friendlink_link',
+      'label'       => t('链接地址.'),
+      'bundle' => 'friendlink',
+      'entity_type' => 'node',
+      'widget'      => array(
+        'type'    => 'link_field',
+      ),
+      'settings' => array(
+        'title' => 'none',
+      ),
+      'display' => array(
+        'default' => array(
+          'label' => 'above',
+          'type' => 'link_default',
+        ),
+      ),
+      'description' => '链接地址',
+    ),
+   'field_friendlink_weight' => array(
+      'field_name' => 'field_friendlink_weight',
+      'label'       => t('weight.'),
+      'bundle' => 'friendlink',
+      'entity_type' => 'node',
+      'widget'      => array(
+        'type'    => 'number_integer',
+      ),
+      'display' => array(
+        'default' => array(
+          'label' => 'above',
+          'type' => 'number_integer',
+        ),
+      ),
+     'description' => 'weight',
+    ),
+ 
+  );
+}
+ 
+function friendlink_uninstall() {
+ 
+  $sql = 'SELECT nid FROM {node} n WHERE n.type = :type';
+  $result = db_query($sql, array(':type' => 'friendlink'));
+  $nids = array();
+  foreach ($result as $row) {
+    $nids[] = $row->nid;
+  }
+ 
+  // Delete all the nodes at once
+  node_delete_multiple($nids);
+ 
+  $instance = array('field_name' => 'comment_body','bundle' => 'comment_node_friendlink','entity_type' => 'comment');
+  field_delete_instance($instance);
+ 
+  $instance = array('field_name' => 'body','bundle' => 'friendlink','entity_type' => 'node');
+  field_delete_instance($instance);
+ 
+   $fields = array_keys(_friendlink_installed_fields());
+   foreach ($fields as $field) {
+      field_delete_field($field);
+  }
+ 
+  // Purge all field infromation
+   field_purge_batch(1000);
+}

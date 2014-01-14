@@ -1,0 +1,435 @@
+<?php
+require_once(drupal_get_path('module','custom_chat').'/custom_chat.api.inc');
+/**
+ * Implements hoo
+ */
+function custom_chat_menu(){
+  $items = array();
+  $items['testchat/%'] = array(
+    'title' => '',
+    'page callback' => 'customChatCall',
+    'page arguments' => array(1),
+    'access callback' => 'user_access',  
+    'access arguments' => array('access view custom_chat'),
+    'description' => 'All-in-one advanced filter and management of your site content.',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['hello_world/link'] = array(  
+    'title' => '创建聊天室',  
+    'page callback' => 'drupal_get_form',  
+    'page arguments' => array('hello_world_link'),
+    'access callback' => 'user_access',  
+    'access arguments' => array('access create custom_chat'), 
+  ); 
+
+  $items['custom_chat_addline/%'] = array(  
+    'title' => '是否可以发信',  
+    'page callback' => '_custom_chat_addline', 
+    'page arguments' =>array(1), 
+    'access callback' => 'user_access',  
+    'access arguments' => array('custom_chat_send'), 
+  ); 
+
+  $items['custom_chat/disable/%'] = array(  
+    'title' => 'dis_chat_room',  
+    'page callback' => 'custom_chat_disable', 
+    'page arguments' =>array(2), 
+    'access callback' => 'user_access',  
+    'access arguments' => array('custom_chat_send'), 
+  ); 
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function custom_chat_permission() {
+  return array(
+    'access view custom_chat' => array(
+      'title' => t('允许查看聊天室'),
+      'description' => t('Allow access to view chat rooms.'),
+    ),
+
+    'access create custom_chat' => array(
+      'title' => t('是否允许创建聊天室'),
+      'description' => t('是否允许创建聊天室'),
+    ),
+
+    'custom_chat_send' => array(
+      'title' => t('是否可以发信'),
+      'description' => t('Access user to send chat info'),
+    ),
+  );
+}
+
+function custom_chat_disable($token){
+  if(is_numeric($token)){
+    db_merge('custom_chat')
+      ->key(array('token' => $token))
+      ->fields(array(
+        'public' => 0,
+      ))
+      ->execute();
+  }
+}
+
+/**
+ * implements hook_image_default_styles
+ */
+function custom_chat_image_default_styles() {
+  $styles = array();
+
+  $styles['30x30'] = array(
+    'label' => '30x30',
+    'effects' => array(
+      array(
+        'name' => 'image_scale_and_crop',
+        'data' => array(
+          'width' => 30,
+          'height' => 30,
+          'upscale' => 1,
+        ),
+        'weight' => 0,
+      ),
+    ),
+  );
+
+  $styles['chart_room_23x23'] = array(
+    'label' => 'chart_room_23x23',
+    'effects' => array(
+      array(
+        'name' => 'image_scale_and_crop',
+        'data' => array(
+          'width' => 23,
+          'height' => 23,
+          'upscale' => 1,
+        ),
+        'weight' => 1,
+      ),
+    ),
+  );
+
+  return $styles;
+}
+
+function _custom_chat_addline($action){ 
+try{
+  $response = array();  
+  switch($action){
+    case 'login':
+      $response = Chat::login($_POST['name'],$_POST['email']);
+    break;
+    
+    case 'checkLogged':
+      $response = Chat::checkLogged();
+    break;
+    
+    case 'logout':
+      $response = Chat::logout();
+    break;
+    
+    case 'submitChat':
+      global $user;
+      $uids = explode('-',$_POST['uids']); 
+      if (!isset($_POST['chatText'])) {
+        drupal_json_output(array('data' => array('accessDenied' => 'invalid')));
+        drupal_exit();
+      }
+      $chatroom = new customChat($_POST['cid']);
+      $cmid = array();
+      foreach ($uids as $key => $uid) {
+        if(is_numeric($uid)){
+          $message = array(
+            'cid' => $chatroom->get('cid'),
+            'from_uid' => $user->uid,
+            'msg' => $_POST['chatText'],
+            'recipient_uid' => $uid,
+            'created' => time(),
+          );
+          $cmid[] = $chatroom->saveMessage($message);
+        }
+      }
+      drupal_json_output(array('data' => array('messageCmid' => $cmid[0])));
+      drupal_exit();
+    break;
+    
+    case 'getUsers':
+      $users = array();
+      $chatroom = new customChat($_GET['cid']);
+      $uarrs = $chatroom->get('allowedUids'); 
+
+      foreach($uarrs as $key=>$uarr){
+        $user = user_load($uarr->uid);
+        $user->gravatar =image_style_url('30x30',$user->picture->uri);
+        $users[] = $user;
+      }
+      drupal_json_output(array(
+        'users' => $users,
+        'total' => count($chatroom->get('allowedUids'))
+      ));
+      drupal_exit();
+    break;
+    
+    case 'getChats':
+      $chatroom = new customChat($_GET['cid']);
+      if($chatroom->get('public')){
+        $response = $chatroom->loadMessages($_GET['lastID'],$GLOBALS['user']->uid);
+        $chats = array();
+        if(!empty($response)){
+          foreach($response as $cmid=>$chat){
+            // Returning the GMT (UTC) time of the chat creation:
+            $chat->id = $cmid;
+            $chat->author = $chat->name;
+            $chat->text = $chat->msg;
+            $chat->time = array(
+              'hours'   => gmdate('H',$chat->created),
+              'minutes' => gmdate('i',$chat->created)
+            );
+            $picturefid = db_query('select picture from {users} where uid ='.$chat->from_uid)->fetchField();
+            if(is_numeric($picturefid)){
+              $chat->gravatar = image_style_url('chart_room_23x23',file_load($picturefid)->uri);
+            }else{
+              $chat->gravatar = '';
+            }
+            $chats[] = $chat;
+          }
+        }
+        $resarr = array('chats' => $chats,'disable' => 0);
+      }else{
+        $resarr = array('disable' => 1);
+      }
+      drupal_json_output($resarr);
+      drupal_exit();
+    break;
+    
+    default:
+      throw new Exception('Wrong action');
+  }
+}
+catch(Exception $e){
+  die(json_encode(array('error' => $e->getMessage())));
+}  
+}
+
+function hello_world_link() {  
+  $form['intro'] = array(
+    '#type' => 'markup',
+    '#markup' => t("<div>创建聊天室</div>"),
+  );
+
+  // Shows the 'after' command with a callback generating commands.
+  $form['after_command_example_fieldset'] = array(
+    '#type' => 'fieldset',
+    '#title' => t("一键一个创建聊天室")
+  );
+
+  $form['after_command_example_fieldset']['name'] = array(
+    '#type' => 'textfield',
+    '#required' => true,
+    '#title' => '聊天室的名字：',
+  );
+
+  $form['after_command_example_fieldset']['token'] = array(
+    '#type' => 'textfield',
+    '#required' => true,
+    '#title' => '聊天室的token：',
+  );
+
+  $form['after_command_example_fieldset']['after_command_example'] = array(
+    '#value' => t("创建聊天室"),
+    '#type' => 'submit',
+    '#ajax' => array(
+      'callback' => 'ajax_example_advanced_commands_after_callback_submit',
+      "wrapper" => "details-container",
+      "effect" => "fade"
+    ),
+    '#suffix' => "<div id='after_div'></div>",
+  );
+  return $form;
+}
+
+function ajax_example_advanced_commands_after_callback_submit($form, $form_state) {  
+  $error = '';
+  if ($form_state['values']['name'] == '') {
+    $error = theme('error_form_ajax',array('请填写name','red'));
+  }
+
+  if ($form_state['values']['token'] == '') {
+    $error .= theme('error_form_ajax',array('请填写token','red'));
+  }
+
+  if($form_state['values']['token']!=''){
+    $newChat = new customChat();
+    $newChat->set('token',$form_state['values']['token']);
+    $obj = $newChat->loadChatByToken(); 
+    if(!empty($obj)){
+      $error = theme('error_form_ajax',array('聊天室token重复！','red'));
+    }
+  }
+
+  if($error!=''){
+    $commands = array();    
+    $commands[] = ajax_command_html('#after_div', $error);  
+    return array('#type' => 'ajax', '#commands' => $commands);    
+  }else{
+    $param = array(
+      'uid'=>NULL, 
+      'chatname'=>$form_state['values']['name'], 
+      'token'=>$form_state['values']['token']
+    );
+    $obj = createChat($param);
+    if(isset($obj) && !empty($obj)){
+      $output = theme('error_form_ajax',array(t("聊天室".$form_state['values']['name'].'创建成功！'.drupal_render(drupal_get_form('add_chat_user',array($obj->cid)))),'green'));   
+    }else{
+      $output = theme('error_form_ajax',array(t("聊天室".$form_state['values']['name'].'创建失败！'),'red'));   
+    }
+    $commands = array();    
+    $commands[] = ajax_command_html('#after_div', $output.l('去聊天','testchat/'.$obj->cid,array('attributes'=>array('target'=>'_blank'))));  
+    return array('#type' => 'ajax', '#commands' => $commands);    
+  }  
+} 
+
+function add_chat_user($form,$form_state,$args){
+  $cid = $args[0];
+  // Shows the 'after' command with a callback generating commands.
+  $form['add_user_to_chat'] = array(
+    '#type' => 'fieldset',
+    '#title' => t("添加用户到聊天室")
+  );
+
+  $form['add_user_to_chat']['uid'] = array(
+    '#type' => 'textfield',
+    '#required' => true,
+    '#title' => 'uid',
+  );
+
+  $form['add_user_to_chat']['cid'] = array(
+    '#type' => 'hidden',
+    '#value' => $cid,
+  );
+
+  $form['add_user_to_chat']['add'] = array(
+    '#value' => t("添加"),
+    '#type' => 'submit',
+    '#ajax' => array(
+      'callback' => 'ajax_example_advanced_commands_add_user',
+    ),
+    '#suffix' => "<div id='add_user_div'></div>",
+  );
+  return $form;
+}
+
+function ajax_example_advanced_commands_add_user($form, $form_state){
+  $error = '';
+  $cid = $form_state['values']['cid'];
+  $uid = $form_state['values']['uid'];
+  $chatRoom = new customChat($cid);
+  if ($uid == '') {
+    $error = theme('error_form_ajax',array('请填写uid','red'));
+  }else{
+    $userobj = user_load($uid);
+    if(empty($userobj)){
+      $error = theme('error_form_ajax',array('没有该用户','red'));
+    }
+    if($chatRoom->checkUserForCid($uid)){
+      $error = theme('error_form_ajax',array('对不起，该用户已经在这个房间了','red'));
+    }
+  }
+
+  if($error!=''){
+    $commands = array();    
+    $commands[] = ajax_command_html('#add_user_div', $error);  
+    return array('#type' => 'ajax', '#commands' => $commands);    
+  }else{
+  $bool = $chatRoom->createChatUsers($uid);
+  if($bool){
+      $output = theme('error_form_ajax',array(t("用户".$userobj->name.'已经添加到聊天室'.$chatRoom->get('title')),'green'));   
+    }else{
+      $output = theme('error_form_ajax',array(t('添加失败！'),'red'));   
+    }
+    $commands = array();    
+    $commands[] = ajax_command_html('#add_user_div', $output);  
+    return array('#type' => 'ajax', '#commands' => $commands);    
+  }  
+}
+
+function customChatCall($cid){
+  if(isset($cid) && is_numeric($cid)){
+    $chatRoom = new customChat($cid);
+    if($chatRoom->checkUserForCid($GLOBALS['user']->uid)){
+      return _custom_chat_get_room($cid);
+    }else{
+      return '您还没有被邀请到该聊天室！';
+     }
+   
+  }else{
+    return '无此房间号';
+  }
+}
+
+/**
+ * return a room style of html
+ */
+function _custom_chat_get_room($cid){
+  if(is_numeric($cid)){
+    $path = drupal_get_path('module','custom_chat');
+    drupal_add_css($path.'/js/jScrollPane/jScrollPane.css');
+    drupal_add_css($path.'/css/page.css');
+    drupal_add_css($path.'/css/chat.css');
+    drupal_add_css($path.'/css/custom_chat.css');
+    drupal_add_js($path.'/js/jScrollPane/jquery.mousewheel.js');
+    drupal_add_js($path.'/js/jScrollPane/jScrollPane.min.js');
+    drupal_add_js($path.'/js/custom_chat.js');
+    $chatObj = new customChat($cid);
+    //获取在线用户
+    $onlineuser_str = createOnlineUserHelper($chatObj); 
+    $lastcmid = $chatObj->get('latestMessage') ? $chatObj->get('latestMessage')->cmid : 0;
+    $picture = !empty($GLOBALS['user']->picture) ? image_style_url('chart_room_23x23',file_load($GLOBALS['user']->picture)->uri) : '';
+    return theme('customchat_room',array('onlineuser'=>$onlineuser_str,'cid'=>$cid,'lastcmid'=>$lastcmid,'picture'=>$picture));
+  }else{
+    return '对不起没有该房间！';
+  }
+}
+
+function createOnlineUserHelper($chatObj){
+  $string = '';
+  foreach ($chatObj->get('allowedUids') as $uid) {
+    if($GLOBALS['user']->uid!=$uid->uid){
+      $userObj = user_load($uid->uid);
+      if(is_object($userObj)){
+        $string .= '<div title="'.$userObj->name.'" class="user">';
+        $string .= '<input type="hidden" id="custom_chat_prename" value="'.$userObj->name.'">';
+        if(isset($userObj->picture->uri)){
+          $string .= '<img width="30" height="30" onload="this.style.visibility=\'visible\'" src="'.image_style_url('30x30',$userObj->picture->uri).'" style="visibility: visible;">';
+        }else{
+          $string .= '<img width="30" height="30" onload="this.style.visibility=\'visible\'" src="" style="visibility: visible;">';
+        }
+        $string .= '</div>';
+        $string .= '<input type="checkbox" name="custom_chat_accessname[]" checked=true value="'.$userObj->uid.'">';
+      }
+    }  
+  }
+  $string .= '<p class="count">'.count($chatObj->get('allowedUids')).'人在线</p>';
+  return $string;
+}
+
+/**
+ * Implements hook_theme
+ */
+function custom_chat_theme(){
+  return array(
+    'customchat_room' => array(
+      'template' => 'templates/customchat_room',
+      'variables' => array('onlineuser'=>NULL,'cid'=>NULL,'lastcmid'=>NULL,'picture'=>NULL),
+    ),
+    'error_form_ajax' => array(
+       'render element' => 'param',
+       'variables' => array('error' => NULL,'color' => NULL),
+    ),
+  );
+}
+
+function theme_error_form_ajax($param){
+  return '<font color="'.$param[1].'">'.$param[0].'</font>';
+}

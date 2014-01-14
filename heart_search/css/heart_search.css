@@ -1,0 +1,23 @@
+#search-block-form{
+  padding-top: 9px;
+}
+
+.nr2 li.search-result strong{
+  color: red;
+}
+
+#search-block-form .input_152{
+  margin-top: 0px;
+}
+
+.top_ss_btn{
+  margin-top: 0px !important;
+}
+
+#search-block-form #edit-submit--3{
+  cursor:pointer;
+}
+
+#search-block-form input.disabled{
+  color:#999999 !important;
+}

@@ -1,0 +1,123 @@
+<?php
+/**
+ * Implemenation of hook_install().
+ */
+function or_chart_install() {
+  drupal_set_message();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function or_chart_uninstall() {
+  variable_del('or_chart_vid');
+}
+
+/**
+ * Implemenation of hook_schema().
+ */
+function or_chart_schema() {
+  $schema['node_counter_per'] = array(
+    'description' => 'count node viewed every time.',
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique id.',
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'node id.',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'This uid is current article author.',
+      ),
+      'visit_num' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The node viewed number.',
+      ),
+      'year' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The node viewd year.',
+      ),
+      'month' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The node viewd month.',
+      ),
+      'day' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The node viewd day.',
+      ),
+      'created' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The node viewd time.',
+      ),
+      
+    ),
+    'primary key' => array('id'),
+  );
+
+  $schema['url_counter_per'] = array(
+    'description' => 'count node viewed every time.',
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique id.',
+      ),
+      'tid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'taxonomy tid.',
+      ),
+      'url' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'This is current url.',
+      ),
+      'url_humen' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => false,
+        'description' => 'This is current url humen distinguish.',
+      ),
+      'visit_num' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The url viewed number.',
+      ),
+      'year' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The url viewd year.',
+      ),
+      'month' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The url viewd month.',
+      ),
+      'day' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The url viewd day.',
+      ),
+      'created' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The url viewd time.',
+      ),
+      
+    ),
+    'primary key' => array('id'),
+  );
+  return $schema;
+}

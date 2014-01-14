@@ -1,0 +1,93 @@
+<?php
+/**
+ * Implements hook_permission
+ */
+function jquery_menu_permission(){
+  return array(
+    'administrater_menu' => array(
+      'title' => t('查看管理员菜单'),
+      'description' => t('查看管理员菜单'),
+    ),
+  );
+}
+
+/**
+ * get adminmenu html
+ * @param $vid
+ * @return html 
+ */
+function getAdminMenu($vid){
+  if(user_access('administrater_menu')){
+    $path = drupal_get_path('module','jquery_menu');
+    drupal_add_css($path.'/dist/css/superfish.css');
+    drupal_add_js($path.'/dist/js/superfish.js');
+    drupal_add_js($path.'/dist/js/jquery_menu.js');
+    $str = '';
+    $str .='<ul class="sf-menu" id="jquery_menu">
+              <li class="current" id="jquery_menu_superfish">
+                <a href="javascript:void(0)">管理后台</a>';
+    $str .= _get_tree($vid,0,1);   
+    return $str .='</li></ul>';
+  }else{
+    return '';
+  }
+}
+
+/**
+ * @param $path url
+ * check $path is not access
+ */
+function _menu_access_check($path){
+  if ($router_item = menu_get_item($path)) {  
+    if(is_array($router_item)){
+      return $router_item['access'];
+    }else{
+      return false;
+    }
+  }
+}
+
+/**
+ * @param $vid  vocabulary id
+ * @param $pid  parent id
+ * @param $dpth dpth 深度
+ */
+function _get_tree($vid,$pid,$dpth){
+  $www = url(NULL, array('absolute' => TRUE));
+  $str = '';
+  $tarr1 = taxonomy_get_tree($vid,$pid,$dpth); 
+  if(!empty($tarr1)){
+    $str.='<ul>';
+    foreach ($tarr1 as $key1 => $t1) {
+    //获取term属性
+    $taxarr1 = taxonomy_term_load($t1->tid); //dpm($taxarr1);
+    if(isset($taxarr1) && is_object($taxarr1)){
+      $link = isset($taxarr1->field_admin_menu_link['und'][0]['safe_value']) ? $taxarr1->field_admin_menu_link['und'][0]['safe_value'] : '';
+      $linktype = isset($taxarr1->field_admin_menu_type['und'][0]['value']) ? $taxarr1->field_admin_menu_type['und'][0]['value'] : '';
+      //判断是否显示该链接
+      if(isset($taxarr1->field_admin_menu_display['und'][0]['value']) && !$taxarr1->field_admin_menu_display['und'][0]['value']){
+        continue;
+      }else{
+        //显示
+        //判断该链接是否有权限
+        $linkarr = explode('?',$link);
+        $checklink = $linkarr[0];
+        if(_menu_access_check($checklink)){
+          //有权限
+          //定义path  1:链接   2:导航
+          $path = ($linktype==1) ? $www.$link : 'javascript:void(0)';
+          $target = ($path=='javascript:void(0)') ? '' : 'target="_blank"';
+          $str .='<li><a href="'.$path.'" '.$target.'>'.$taxarr1->name.'</a>';
+          $str .=_get_tree($vid,$t1->tid,1);
+          $str .='</li>';
+        }else{
+          //没权限
+          continue;
+        }
+       }
+      }
+    }  
+    $str.='</ul>';
+  } 
+  return $str;
+}

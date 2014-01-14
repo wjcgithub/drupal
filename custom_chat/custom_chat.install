@@ -1,0 +1,147 @@
+<?php
+/**
+ * Implements hook_schema().
+ */
+function custom_chat_schema() {
+  $schema['custom_chat'] = array(
+    'fields' => array(
+      'cid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'description' => 'Primary key: cid of the custom_chat.',
+      ),
+      'uid' => array(
+        'description' => 'The {users}.uid that created this custom_chat.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'token' => array(
+        'description' => '这个字的是非必须的字段，定制使用.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => false,
+      ),
+      'title' => array(
+        'description' => 'The title of this custom_chat.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'public' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Whether this custom_chat is public or not.',
+      ),
+      'archived' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Whether this custom_chat is archived or not.',
+      ),
+      'format' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'The {filter_format}.format used for message output.',
+      ),
+      'created' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'created time',
+      ),
+    ),
+    'primary key' => array('cid'),
+    'indexes' => array(
+      'uid' => array('uid'),
+      'public' => array('public'),
+      'archived' => array('archived'),
+    ),
+  );
+  $schema['custom_chat_user'] = array(
+    'fields' => array(
+      'cid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'The cid of the chat.',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'ID of the user allowed in this chat.',
+      ),
+      'read_only' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'Flag as to whether this uid is read-only.',
+      ),
+      'status' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+        'description' => '用户是否在线.0不在线，1在线，2忙碌，3离开',
+      ),
+    ),
+    'primary key' => array('cid','uid'),
+    'indexes' => array(
+      'cid' => array('cid'),
+      'uid' => array('uid'),
+    ),
+  );
+ 
+  $schema['custom_chat_msg'] = array(
+    'fields' => array(
+      'cmid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'cid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'from_uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'from uid',
+      ),
+      'msg' => array(
+        'type' => 'text',
+        'size' => 'big',
+      ),
+      'recipient_uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'to uid',
+      ),
+      'created' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'indexes' => array(
+      'cid' => array('cid'),
+      'created' => array('created'),
+      'recipient_uid' => array('recipient_uid'),
+      'from_uid' => array('from_uid'),
+    ),
+    'primary key' => array('cmid'),
+  );
+  return $schema;
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function custom_chat_uninstall() {
+  // TODO: fill in this stub.
+}
+

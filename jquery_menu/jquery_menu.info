@@ -1,0 +1,4 @@
+name = "jquery_menu"
+description = "jquery menu style"
+package = "heart"
+core = "7.x"

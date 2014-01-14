@@ -1,0 +1,31 @@
+#chatContainer{
+  background: url("../img/page_bg.jpg") repeat-x scroll 0 0 #323232;
+  font: 15px Calibri,Arial,sans-serif;
+  color: #EEEEEE;
+  width: 373px;
+  border-radius: 4px;
+  padding: 5px;
+}
+
+#chatUsers{
+  /*display: none;*/
+  width: 66px;
+  margin-right: 5px;
+  margin-top: 5px;
+}
+
+#chatUsers input[type='checkbox']{
+  width: 100%;
+}
+
+#chatUsers .user {
+  margin:10px 0 0 15px;
+ } 
+
+input#chatText {
+  width: 260px;
+}
+
+.jspHorizontalBar{
+  display: none;
+}

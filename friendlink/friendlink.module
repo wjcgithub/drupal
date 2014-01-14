@@ -1,0 +1,120 @@
+<?php
+/**
+ * Impletements hook_node_info
+ */
+function friendlink_node_info() {
+  return array(
+      'friendlink' => array(
+          'name' => t('友情链接'),
+          'base' => 'friendlink',
+          'description' => t('友情链接'),
+          'has_title' => TRUE,
+          'title_label' => t('友情链接名称：'),
+          'locked' => FALSE,
+      ),
+  );
+}
+
+/**
+ * Impletements hook_form
+ */ 
+function friendlink_form($node, $form_state) {
+  $type = node_type_get_type($node);
+  $form['title'] = array(
+    '#type' => 'textfield',
+    '#title' => check_plain($type->title_label),
+    '#default_value' => !empty($node->title) ? $node->title : '',
+    '#required' => TRUE, 
+    '#weight' => -5
+  );
+ 
+  return $form;
+}
+
+
+/**
+ * Implements hook_menu().
+ *
+ * We'll let drupal_get_form() generate the form page for us, for both of
+ * these menu items.
+ *
+ * @see drupal_get_form()
+ */
+function friendlink_menu() {
+  // Basic example with single-depth sorting.
+  $items['admin/friendlink'] = array(
+    'title' => '友情链接管理',
+    'description' => '友情链接管理',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('friendlink_admin_form'),
+    'access arguments' => array('administrater_friendlink'),
+    'file' => 'friendlink_form.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission
+ */
+function friendlink_permission(){
+  return array(
+    'administrater_friendlink'=>array(
+      'title' => t('administrater friend link'),
+      'description' => t('administrater friend link'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function friendlink_theme() {
+  return array(
+    // Theme function for the 'simple' example.
+    'friendlink_admin_form' => array(
+      'render element' => 'form',
+      'file' => 'friendlink_form.inc',
+    ),
+
+    'friendlink_render' => array(
+      'variables' => array('link' => NULL),
+      'file' => 'friendlink_form.inc',
+    ),
+  );
+}
+
+function _get_friend_link(){
+  $query = db_select('node','n');
+  $query->leftJoin('field_data_field_friendlink_link','ffl','n.nid=ffl.entity_id');
+  $query->leftJoin('field_data_field_friendlink_weight','ffw','n.nid=ffw.entity_id');
+  $query->condition('n.type','friendlink');
+  $query->orderBy('ffw.field_friendlink_weight_value');
+  $query->addField('n','title','title');
+  $query->addField('n','nid');
+  $query->addField('ffl','field_friendlink_link_url', 'url');
+  $query->addField('ffw','field_friendlink_weight_value','weight');
+  $result = $query->execute()->fetchAll();
+  return $result;
+}
+
+function friendlink_render(){
+  $result = _get_friend_link();
+  return theme('friendlink_render',array('link'=>$result));
+} 
+
+/**
+ * Get the html code of an image
+ *
+ * @param the pretended image
+ * @return html tag img
+ */
+function _pdf2img_get_img($action, $title) {
+  $path =  base_path() . drupal_get_path('module', 'friendlink') .'/images/'. $action .'.png';
+  if ($title == NULL) {
+    $html = '<img src="'. $path .'" alt="untitled image" />';
+  }
+  else {
+    $html = '<img src="'. $path .'" title="'. $title .'" alt="'. $title .'" />';
+  }
+  return $html;
+}

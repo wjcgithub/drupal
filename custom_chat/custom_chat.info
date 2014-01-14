@@ -1,0 +1,6 @@
+name = "Custom chat"
+description = "this is a chat simple"
+core = '7.x'
+package = 'heart'
+files[] = 'custom_chat.customchat.inc'
+files[] = 'custom_chat.api.inc'

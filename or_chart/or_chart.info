@@ -1,0 +1,6 @@
+name = "orthonline chart"
+description = this is orth chart
+package = "Orth"
+core = 7.x
+dependencies[] = or_actions
+dependencies[] = or_trigger

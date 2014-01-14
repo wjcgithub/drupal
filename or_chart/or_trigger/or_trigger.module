@@ -1,0 +1,172 @@
+<?php
+
+/**
+ * @file
+ * Trigger definition example module.
+ */
+
+/**
+ * @defgroup trigger_example Example: Trigger
+ * @ingroup examples
+ * @{
+ *
+ * Trigger definition example module.
+ *
+ * Triggers and actions are a pair of special-purpose functions allowing some
+ * Drupal programming without using PHP. Using the
+ * appropriate action in a specific event, a site administrator can
+ * add new functionality. Examples are:
+ *  - Send an email after a node is published or edited.
+ *  - Display a message after a user has logged in.
+ *  - Display a message and send an email after a node has been deleted.
+ *
+ * A Trigger is a special function able to enqueue actions. The trigger module
+ * provides the interface allowing us to associate certain actions with certain
+ * triggers.
+ *
+ * Actions are functions intended to be run by triggers.
+ *
+ * A trigger should build the appropriate context for the action to be fired.
+ * Actions are very often
+ * grouped by functionality: examples are 'user', 'node', 'taxonomy'. When some
+ * actions are grouped it is because they expect the same arguments. This way,
+ * you can enqueue as many actions understanding the 'user' object as you want.
+ *
+ * Not all actions can be used in all triggers because they require different
+ * contexts. But some actions
+ * are generic enough to not require special objects in their
+ * contexts, and so can be used on every available trigger. This 'group' type
+ * is used by actions to be available for this trigger.
+ *
+ * What are good candidates to be triggers? Any function can be a trigger, as
+ * long as it has the code to call the enqueued actions, but to make Drupal
+ * more extensible, you will find hooks (from Drupal and contributed modules)
+ * very good candidates. A trigger should build the arguments, ask for enqueued
+ * actions and run them. You may define a function being a trigger, and run it
+ * through a button in the front page, or you may prepare a trigger for a hook,
+ * and everytime that hook is fired, your trigger will be.
+ *
+ * What are good candidates to be actions? any function is a possible action,
+ * the only problem is finding a trigger able to run it.
+ *
+ * This module describes how to create triggers and actions for Drupal. In this
+ * example we are providing two triggers:
+ *
+ * - A custom trigger, in its simplest form. We provide a page with a button.
+ *   This button does nothing at all, but when you click (and submit the empty
+ *   form), any actions you have configured will be executed.
+ *
+ * - A trigger which extends the capabilities of User triggers.
+ *   This creates a new event which fires the first time a user ever logs in.
+ *   In the module we will create it, and then provide a trigger for
+ *   the administrator to be able to enqueue actions. They will be executed
+ *   only the first time the user logs in the system.
+ *
+ * See:
+ *
+ * @link http://drupal.org/node/375833 Creating Triggers @endlink
+ *
+ * @link http://drupal.org/node/172152 Writing Actions @endlink
+ *
+ * @link http://drupal.org/node/199254 Triggers and Actions in Drupal 6 @endlink
+ *
+ * @see hook_trigger_info()
+ * @see hook_trigger_info_alter()
+ * Also see the @link action_example.module Action Example @endlink.
+ */
+
+/**
+ * Implements hook_trigger_info().
+ *
+ * We call hook_trigger_info when we are defining the triggers we provide.
+ * Triggers are the events that make fire any number of assigned actions. In
+ * this example, we are registering our three new triggers, providing the group
+ * (system, user..), the callback 'hook' (only informative, does not require a
+ * real hook) function and the label to be shown in the triggers interface.
+ *
+ * Example: In the group (a tab) 'system', for the 'mail' functionality, show:
+ * An email is sent by Drupal.
+ */
+// function or_trigger_trigger_info() {
+//   return array(
+//     'chart_trigger' => array(
+//       'page_load' => array(
+//         'label' => t('when page loaded'),
+//       ),
+//     ),
+//   );
+// }
+
+/**
+ * @param $options
+ *   Array of arguments used to call the triggersomething function, if any.
+ */
+// function or_trigger_page_load($options = array()) {
+//   // Ask the trigger module for all actions enqueued for the 'triggersomething' trigger.
+//   $aids = trigger_get_assigned_actions('page_load'); 
+//   // prepare a basic context, indicating group and "hook", and call all the
+//   // actions with this context as arguments.
+//   $context = array(
+//     'group' => 'chart_trigger',
+//     'hook' => 'page_load'
+//   );
+//   actions_do(array_keys($aids), (object) $options, $context);
+// }
+
+/**
+ * trigger page load goto save url view's number
+ */
+function or_trigger_init(){
+//    or_trigger_page_load();
+    //$cur_url = trim(str_replace(array('http://','https://'), '', $GLOBALS['base_url'].'/'.current_path()));
+    global $_domain;
+    if(is_array($_domain)){
+        $cur_url = trim($_domain['path'].current_path());
+    }else{
+        $cur_url = trim($GLOBALS['base_url'].'/'.current_path());
+    }
+    if(variable_get('or_chart_vid')>0){
+        $res = db_query('select machine_name from {taxonomy_vocabulary} where vid=:vid',array(':vid'=>variable_get('or_chart_vid')))->fetchAll();
+        $taxarr = array();
+        $tarurl = taxonomy_get_term_by_name($cur_url,$res[0]->machine_name); 
+        $taxarr = array_keys($tarurl);
+        if(!empty($taxarr)){
+            $tid = $taxarr[0];
+            $year = date('Y',time());
+            $month = date('m',time());
+            $day = date('d',time());
+            $created = time();
+            $result = array();
+            $query = db_select('url_counter_per','ucp');
+            $query->fields('ucp',array('visit_num','id'));
+            $query->condition('tid', $tid);
+            $query->condition('year', $year);
+            $query->condition('month', $month);
+            $query->condition('day', $day);
+            $result = $query->execute()->fetchAll(); 
+            if(empty($result)){
+                //add 
+                db_insert('url_counter_per')
+                ->fields(array(
+                    'id' => NULL,
+                    'tid' => $tid,
+                    'url' => $cur_url,
+                    'url_humen' => $tarurl[$tid]->description,
+                    'visit_num' => 1,
+                    'year' => $year,
+                    'month' => $month,
+                    'day' => $day,
+                    'created' => time()
+                ))->execute();
+            }else{
+                //update
+                db_update('url_counter_per')
+                ->fields(array(
+                    'visit_num' => ++$result[0]->visit_num
+                ))
+                ->condition('id',$result['0']->id)->execute();
+            }
+        }
+    }
+    
+}

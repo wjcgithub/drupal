@@ -1,0 +1,141 @@
+<?php
+
+/**
+ * Implements hook_action_info().
+ *
+ * We call hook_action_info when we are defining the actions we provide.
+ * Actions are the actions fired by the associated triggers. In this example,
+ * we are registering our three new actions, providing the unique name (using
+ * Drupal's convention modulename_description_action), an easy to understand
+ * description of what the action does, the 'object' expected by this action
+ * (default options from core are node, user, comment and system, however other
+ * trigger modules may declare new object types), which are the triggers allowed
+ * to use these action, and if some customization is available. Please, note
+ * that the function name is not required to finish as _action to be declared as
+ * a Drupal action, and that only information provided by hook_trigger_info()
+ * will be considered for valid actions creation.
+ *
+ * These are the actions being provided in hook_action_info()
+ *
+ * - action_example_basic_action: this action is a dummy function which can be
+ *   used by any trigger. The label describes that the action will do nothing,
+ *   but is enough for a basic example. Type is set to system, so users will not
+ *   be confused about the scope of this action (expecting a node, user, or any
+ *   other object). This action is not configurable, and will appear as
+ *   available in the list of action under the menu entry:
+ *   'admin/config/system/actions.
+ * - action_example_unblock_user_action: Unblocks a user.
+ * - action_example_node_sticky_action: This action is a complex action that is
+ *   only available to Node type triggers, and can only be associated with the
+ *   events node presave, node insert and node update. The action does not
+ *   exist by default and it has to be created by user configuration. This makes
+ *   it an "advanced action" in Drupal, so-called because it requires
+ *   configuration or customization.
+ *   In this example action, the action will promote nodes and make them sticky
+ *   during presave, insert, or update, but only for particular users. As an
+ *   advanced action, it first needs to be created in the actions management
+ *   page (admin/config/system/actions). At the bottom of that page a selection
+ *   list shows a list of advanced actions that will includes the option
+ *   'Promote to frontpage and sticky on top any content created by :'
+ *   Selecting this option and clicking the 'Create' button, a configuration
+ *   form will ask for an author name. When this action is associated to any
+ *   of the possible Node trigger events, it will only be effective if the
+ *   author of the content matches the author configured by the action.
+ *
+ * @return
+ *   An associative array of action descriptions. The keys of the array
+ *   are the names of the action functions, and each corresponding value
+ *   is an associative array with the following key-value pairs:
+ *   - 'type': The type of object this action acts upon. Core actions have types
+ *     'node', 'user', 'comment', and 'system', but additional types can be
+ *     used, as long as the trigger and action agree on them.
+ *   - 'label': The human-readable name of the action, which should be passed
+ *     through the t() function for translation.
+ *   - 'configurable': If FALSE, then the action doesn't require any extra
+ *     configuration. If TRUE, then your module must define a form function with
+ *     the same name as the action function with '_form' appended (e.g., the
+ *     form for 'node_assign_owner_action' is 'node_assign_owner_action_form'.)
+ *     This function takes $context as its only parameter, and is paired with
+ *     the usual _submit function, and possibly an _validate function.
+ *   - 'triggers': An array of the triggers that can trigger this
+ *     action. For example: array('node_insert', 'user_update'). You can also
+ *     declare support for any trigger by returning array('any') for this value.
+ *   - 'behavior': (optional) A machine-readable array of behaviors of this
+ *     action, used to signal additionally required actions that may need to be
+ *     triggered. Currently recognized behaviors by Trigger module:
+ *     - 'changes_property': If an action with this behavior is assigned to a
+ *       trigger other than a "presave" hook, any save actions also assigned to
+ *       this trigger are moved later in the list. If no save action is present,
+ *       one will be added.
+ *       Modules that are processing actions (like Trigger module) should take
+ *       special care in the "presave" hook, in which case a dependent "save"
+ *       action should NOT be invoked.
+ *
+ * @see hook_action_info()
+ */
+function or_actions_action_info() {
+  return array(
+    'count_user_view_node_per' => array(
+      'label' => t('count user view node per'),
+      'type' => 'node',
+      'configurable' => FALSE,
+      'triggers' => array('node_view'),
+    ),
+  );
+}
+
+/**
+ * Action function for action_example_basic_action.
+ *
+ * This action is not expecting any type of entity object, and can be used with
+ * any trigger type or any event.
+ *
+ * @param $entity
+ *   An optional entity object.
+ * @param $context
+ *   Array with parameters for this action: depends on the trigger.
+ *
+ * @see action_example_action_info()
+ */
+function count_user_view_node_per(&$entity, $context = array()) {
+  if(!isset($context['node'])){
+    $nid = $entity->nid;
+    $uid = $entity->uid;
+  }else{
+    $nid = $context['node']->nid;
+    $uid = $context['node']->uid;
+  }
+  $year = date('Y',time());
+  $month = date('m',time());
+  $day = date('d',time());
+  $created = time();
+  $result = array();
+  $query = db_select('node_counter_per','ncp');
+        $query->fields('ncp',array('visit_num','id'));
+        $query->condition('nid', $nid);
+        $query->condition('year', $year);
+        $query->condition('month', $month);
+        $query->condition('day', $day);
+   $result = $query->execute()->fetchAll();
+  if(empty($result)){
+      //add 
+      db_insert('node_counter_per')
+      ->fields(array(
+          'id' => NULL,
+          'nid' => $nid,
+          'uid' => $uid,
+          'visit_num' => 1,
+          'year' => $year,
+          'month' => $month,
+          'day' => $day,
+          'created' => time()
+      ))->execute();
+  }else{
+      //update
+      db_update('node_counter_per')
+      ->fields(array(
+          'visit_num' => ++$result[0]->visit_num
+      ))
+      ->condition('id',$result['0']->id)->execute();
+  }
+}

@@ -1,0 +1,741 @@
+<?php
+/**
+ * implement hook_menu
+ */
+function or_chart_menu(){
+    $items = array();
+    $items['admin/config/user-interface/or_chart'] = array(
+      'title' => 'chart_counter',
+      'description' => 'chart_counter settings',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('or_chart_settings'),
+      'access arguments' => array('administer or_chart'),
+      'file' => 'or_chart.admin.inc',
+      'type' => MENU_NORMAL_ITEM,
+    );
+    
+    $items['admin/statistics'] = array(
+        'title' => '统计与报表',
+        'type' => MENU_NORMAL_ITEM,
+        'weight' => -10,
+        'page callback' => '_adminStatRole',
+        'access arguments' => array('statistics_role'),
+        'file' => 'chart_role.inc',
+    );
+    
+    $items['admin/statistics/role'] = array(
+        'title' => '按照编辑名和角色统计',
+        'type' => MENU_NORMAL_ITEM,
+        'weight' => -10,
+        'page callback' => '_adminStatRole',
+        'access arguments' => array('statistics_role'),
+        'file' => 'chart_role.inc',
+    );
+
+    $items['admin/statistics/url'] = array(
+        'title' => '按照url统计',
+        'type' => MENU_NORMAL_ITEM,
+        'weight' => -9, 
+        'page callback' => '_adminStatUrl',
+        'access arguments' => array('statistics_url'),
+        'file' => 'chart_url.inc',
+    );
+
+    $items['admin/statistics/node'] = array(
+        'title' => '按照文章统计',
+        'type' => MENU_NORMAL_ITEM,
+        'weight' => -8,
+        'page callback' => '_adminStatNode',
+        'access arguments' => array('statistics_node'),
+        'file' => 'chart_node.inc',
+    );
+    
+    $items['admin/statistics/%'] = array(
+        'title' => '图表分析统计',
+        'weight' => -8,
+        'page callback' => '_adminStatNode',
+        'access arguments' => array('statistics_node'),
+        'file' => 'chart_node.inc',
+    );
+    
+    $items['admin/statistics/userauto'] = array(
+        'title' => 'User autocomplete',
+        'page callback' => '_or_chart_user_autocomplete',
+        'access callback' => 'user_access',
+        'access arguments' => array('manage and filter site statistics'),
+        'type' => MENU_CALLBACK,
+    );
+    
+    return $items;
+} 
+
+/**
+ * implement hook_permission
+ */
+function or_chart_permission(){
+    return array(
+        'statistics_role' => array(
+                'title' => t('按照编辑名和角色统计'),
+                'description' =>t('按照编辑名和角色统计'), 
+        ),
+        'statistics_url' => array(
+                'title' => t('按照url统计'),
+                'description' =>t('按照url统计'), 
+        ),
+        'statistics_node' => array(
+                'title' => t('按照文章统计'),
+                'description' =>t('按照文章统计'), 
+        ),
+        'manage and filter site statistics' => array(
+                'title' => t('过滤并管理网站统计内容'),
+                'description' =>t('过滤并管理网站统计内容'), 
+        ),
+        'administer or_chart' => array(
+                'title' => t('configuration or_chart info'),
+                'description' =>t('configuration or_chart info'), 
+        ),
+    );
+}
+
+/**
+ * @file
+ * or_chart_taxonomy.features.taxonomy.inc
+ */
+
+/**
+ * Implements hook_taxonomy_default_vocabularies().
+ */
+function or_chart_taxonomy_default_vocabularies() {
+  return array(
+    'url_count' => array(
+      'name' => 'url统计',
+      'machine_name' => 'url_count',
+      'description' => 'url统计数据，监听所有用户添加的url',
+      'hierarchy' => 0,
+      'module' => 'taxonomy',
+      'weight' => 0,
+      'rdf_mapping' => array(
+        'rdftype' => array(
+          0 => 'skos:ConceptScheme',
+        ),
+        'name' => array(
+          'predicates' => array(
+            0 => 'dc:title',
+          ),
+        ),
+        'description' => array(
+          'predicates' => array(
+            0 => 'rdfs:comment',
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/**
+ * Menu callback; Retrieve a JSON object containing autocomplete suggestions for existing users.
+ */
+function _or_chart_user_autocomplete($string = '') {
+  $matches = array();
+  if ($string) {
+     $result = db_select('{users}', 'u');
+     $result->condition('u.name', '%'.db_like($string).'%', 'like');
+     $result->addField('u', 'name');
+    $result = $result->execute();
+    while ($account = $result->fetchObject()) {
+      $matches[$account->name] = check_plain($account->name);
+    }
+  }
+  drupal_json_output($matches);
+}
+
+/**
+ * Validation handler for filter doing "dates".
+ */
+function _or_chart_date_validate($form) { 
+  // Make sure this was triggered by the selected filter.
+  if ($form['#name'] != @$form['#post']['filter']) {
+    return;
+  }
+
+  // Determine correct time values depending on the filter name.
+  if (strpos($form['#name'], 'before') === FALSE) {
+    $entered_date = mktime(0, 0, 0, (int)$form['#value']['month'], (int)$form['#value']['day'], (int)$form['#value']['year'], 1);
+  }
+  else {
+    $entered_date = mktime(11, 59, 59, (int)$form['#value']['month'], (int)$form['#value']['day'], (int)$form['#value']['year'], 1);
+  }
+
+  if (empty($entered_date)) {
+    form_error($form, t('%name date value may not be empty.', array('%name' => $form['#name'])));
+  }
+}
+
+/**
+ * Validation handler for filter doing "contains".
+ */
+function _or_chart_contains_validate($form) {  
+  // Make sure this was triggered by the selected filter.
+  if ($form['#name'] == @$form['#post']['filter']) {
+    // Strip blanks to see if the field is empty.
+    $value = trim($form['#value']);
+    if (empty($value)) {
+      form_error($form, t('%name text value may not be empty.', array('%name' => $form['#name'])));
+    }
+  }
+}
+
+/**
+ * Submit handler for date filters.
+ * Ignore the Coder flag - it is a false positive.
+ */
+function _or_chart_date_handler($form, &$form_state) {
+  $filter = $form_state['values']['filter'];
+  return gmmktime(0, 0, 0, $form_state['values'][$filter]['month'], $form_state['values'][$filter]['day'], $form_state['values'][$filter]['year']);
+}
+
+
+/**
+ * Submit handler for 'users' filter.
+ * Ignore the Coder flag - it is a false positive.
+ */
+function _or_chart_users_handler($form, &$form_state) {
+  $name = $form_state['values']['users']; 
+  // Get uid to put in 'user' filter value.
+  $form_state['values']['user'] = db_query('SELECT uid FROM {users} WHERE name = ?', array($name))->fetchField();
+  // Switch filter type to user.
+  $form_state['values']['filter'] = 'user';
+  return $name;
+}
+
+/**
+ * Builds a list of available roles
+ *
+ * @param the format in which to return the list
+ * @return array of all available roles
+ */
+function _or_chart_get_roles($op) {
+  switch ($op) {
+    case 'names':
+      $result = db_query('SELECT rid, name FROM {role} ORDER BY name');
+      break;
+  }
+  $roles = array();
+  while ($role = $result->fetchAssoc()) {     
+    $roles[$role['rid']] = $role['name'];
+  }
+  return $roles;
+}
+
+
+/**
+ * Implementation of hook_theme().
+ *
+ * @ingroup themable
+ */
+function or_chart_theme() { 
+  return array(
+    '_or_chart_filter_form' => array(
+        'render element' => 'form',
+      ),
+    '_or_chart_user' => array(
+        'variables' => array('uid' => NULL),
+      ),
+    'or_chart_type' => array(
+        'variables' => array('type' => NULL),
+      ),
+    '_or_chart_admin_nodes_form' => array(
+         'render element' => 'form',
+         'file' => 'chart_role_admin.inc',
+      ),
+    '_or_chart_admin_url_form' => array(
+         'render element' => 'form',
+         'file' => 'chart_url_admin.inc',
+      ),  
+  );
+}
+
+/**
+ * Theme cmf administration filter form.
+ *
+ * @themable
+ */
+function theme__or_chart_filter_form($form) { 
+  $form = sortArray($form);
+  return '<div id="main-filters"><div id="node-admin-filter-filter">'.render($form['form']['filters']['filter']) .'</div>'
+    .'<div id="node-admin-filter-status">'.render($form['form']['filters']['status']) .'</div></div>'      
+    .'<div id="node-admin-filter-result">'.drupal_render_children($form['form']).'</div><div class="clearfix"></div>'; 
+}
+
+function sortArray($form){
+  //after  
+  if(isset($form['form']['filters']['status']['created_after'])){
+    $year = $form['form']['filters']['status']['created_after']['year'];  
+    $month =   $form['form']['filters']['status']['created_after']['month'];
+    $day =   $form['form']['filters']['status']['created_after']['day'];
+    unset($form['form']['filters']['status']['created_after']['year']);
+    unset($form['form']['filters']['status']['created_after']['month']);
+    unset($form['form']['filters']['status']['created_after']['day']);
+    $form['form']['filters']['status']['created_after']['year'] = $year;
+    $form['form']['filters']['status']['created_after']['month'] = $month;
+    $form['form']['filters']['status']['created_after']['day'] = $day;    
+  }  
+      
+  //before
+  if(isset($form['form']['filters']['status']['created_before'])){
+    $year = $form['form']['filters']['status']['created_before']['year'];  
+    $month =   $form['form']['filters']['status']['created_before']['month'];
+    $day =   $form['form']['filters']['status']['created_before']['day'];
+    unset($form['form']['filters']['status']['created_before']['year']);
+    unset($form['form']['filters']['status']['created_before']['month']);
+    unset($form['form']['filters']['status']['created_before']['day']); 
+    $form['form']['filters']['status']['created_before']['year'] = $year;
+    $form['form']['filters']['status']['created_before']['month'] = $month;
+    $form['form']['filters']['status']['created_before']['day'] = $day;   
+  }  
+  return $form;
+}
+
+/**
+ * Theme (node) type cell on table result.
+ *
+ * @ingroup themable
+ *
+ * @param 0 or node type key
+ * @return formated (node) type
+ */
+function theme_or_chart_type($type) { 
+  return db_query("SELECT name FROM {node_type} WHERE type = ?",  array($type['type']))->fetchField();
+}
+
+/**
+ * Theme user cell on table result.
+ *
+ * @ingroup themable
+ *
+ * @param user ID
+ * @return clickable username with status
+ */
+function theme__or_chart_user($variables) {    
+  $uid = $variables['uid'];
+  if ($uid == 0 || !isset($uid)) {
+    return variable_get('anonymous', t('anonymous'));
+  }
+  $result = db_query('SELECT name, status FROM {users} WHERE uid = :d', array(':d'=>$uid));
+  $user = $result->fetchAssoc();
+  $url_alias = _or_chart_get_user_path($uid);
+
+  $display = $user['status'] ? $user['name'] : _or_chart_get_img('blocked', t('blocked')) .' '. $user['name'];
+  if (user_access('access user profiles')) {
+    $url = $url_alias ? $url_alias : 'user/'. $uid;
+    $output = l($display, $url, array('html' => TRUE));
+  }
+  else {
+    $output = $display;
+  }
+  return $output;
+}
+
+/**
+ * Get the alias path to a user profile
+ *
+ * @param user ID
+ * @return the relative URL of the user profile
+ */
+function _or_chart_get_user_path($uid) {
+  return db_query("
+    SELECT alias
+    FROM {url_alias}
+    WHERE source = '%s';",
+    array('%s'=>'user/'. $uid)
+  )->fetchField();
+}
+
+/**
+ * Get the term for a forum node
+ *
+ * @param node ID
+ * @return the name and forum description
+ */
+function _or_chart_get_forum($nid) {
+  $path = array();
+  $node = node_load($nid); 
+  $parents = taxonomy_get_parents_all($node->tid);
+  foreach ($parents as $parent) {
+    $path[] = $parent->name;
+  }
+  return implode(' > ', array_reverse($path));
+}
+
+/**
+ * Get the html code of an image
+ *
+ * @param the pretended image
+ * @return html tag img
+ */
+function _or_chart_get_img($action, $title) {
+  $path =  base_path() . drupal_get_path('module', 'or_chart') .'/images/'. $action .'.png';
+  if ($title == NULL) {
+    $html = '<img src="'. $path .'" alt="untitled image" />';
+  }
+  else {
+    $html = '<img src="'. $path .'" title="'. $title .'" alt="'. $title .'" />';
+  }
+  return $html;
+}
+
+/**
+ * Build the header of the result table.
+ *
+ * @param $user_page_user
+ *    if we are on a user page, the user that page belongs to, not the current user
+ *
+ * @return array respecting _or_chart_tablesort_sql()
+ */
+function _or_chart_build_header($user_page_user = NULL) {
+
+  $header = array();
+  if (user_access('manage and filter site statistics')) { 
+    //$header[] = theme('table_select_header_cell');
+  }
+
+    $header[] = array('data' => t('ID'), 'field' => 'nid');
+    $header[] = array('data' => t('标题'), 'field' => 'title');
+    $header[] = array('data' => t('作者'), 'field' => 'username');
+    $header[] = array('data' => t('状态'), 'field' => 'status');
+    $header[] = array('data' => t('发布时间'), 'field' => 'created', 'sort' => 'desc');
+    $header[] = array('data' => t('总访问量'), 'field' => 'totalcount');
+    $header[] = array('data' => t('总评论量'), 'field' => 'commentcount');
+  if (user_access('manage and filter site statistics')) {
+    $header[] = array('data' => t('操作'));
+  }
+
+  //add table select all
+  drupal_add_js('misc/tableselect.js');
+  array_unshift($header, array('class' => array('select-all')));
+  return $header;
+}
+
+/**
+* 在d6中移植过来的方法
+*/
+function _or_chart_tablesort_sql($header, $before = '') {
+  $ts = tablesort_init($header);
+  if ($ts['sql']) {
+    // Based on code from db_escape_table(), but this can also contain a dot.
+    $field = preg_replace('/[^A-Za-z0-9_.]+/', '', $ts['sql']);
+
+    // Sort order can only be ASC or DESC.
+    $sort = drupal_strtoupper($ts['sort']);
+    $sort = in_array($sort, array('ASC', 'DESC')) ? $sort : '';
+
+    return " ORDER BY $before $field $sort";
+  }
+}
+
+/**
+ * check valid user
+ * @param type $user
+ * @return boolean
+ */
+function _or_chart_valid_user($user) {
+  if (!empty($user->uid)) {
+    return TRUE;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Perform adjusted query.
+ * 
+ * @param $user_page_user
+ *    if we are on a user page, the user that page belongs to, not the current user
+ *
+ *
+ * @param array respecting _or_chart_tablesort_sql()
+ * @return result of permormed query
+ */
+function _or_chart_perform_query($header, $kind = NULL, $user_page_user = NULL) { 
+  //获取参数 where join args   
+  $filter = _or_chart_build_filter_query();
+  $where = ' '. $filter['where'];
+    $query = "SELECT n.nid, n.title, n.status, n.created, "
+    //."n.changed, n.promote, n.sticky, n.moderate, n.language, "
+    ."n.changed, n.promote, n.sticky, n.tnid, "      
+    ."u.name AS username, u.uid, r.body_value body, "
+    ."c.totalcount, "    
+    ."cs.comment_count AS commentcount "     
+    //."u.name AS username, u.uid "       
+    ."FROM {node} n "
+    //        ."LEFT JOIN {field_revision_body} r ON r.revision_id = n.vid "
+    ."LEFT JOIN {field_data_body} r ON r.entity_id = n.nid "
+    ."INNER JOIN {users} u ON n.uid = u.uid "
+    ."LEFT JOIN {node_counter} c ON c.nid = n.nid "    
+    ."LEFT JOIN {node_comment_statistics} cs ON cs.nid = n.nid "    
+    . $filter['join']
+    . $where
+    . _or_chart_tablesort_sql($header);
+    $limit = isset($_SESSION['or_chart_max_rows']) ? $_SESSION['or_chart_max_rows'] : 50;
+    $page = pager_default_initialize(db_query($query,$filter['args'])->rowCount(), $limit);
+    $offset = $limit * $page;
+    $result = db_query_range($query, $offset, $limit, $filter['args']);
+    return $result;
+}
+
+/**
+ * 在session中调用不同条件
+ */
+function getFilterConditionSession(){
+    switch (arg(2)) {
+        case 'node':
+            return $_SESSION['_or_chart_node_overview_filter'];
+            break;
+        case 'url':
+            return $_SESSION['_or_chart_url_overview_filter'];
+            break;
+        case 'role':
+            return $_SESSION['_or_chart_overview_filter'];
+            break;
+        default:
+            break;
+    }
+}
+
+/**
+ *  QUERIES
+ */
+/**
+ * Build the variable parts of the query to be performed regarding the filter status.
+ *
+ * @return associative array with WHERE JOIN query parts and respective arguments
+ */
+function _or_chart_build_filter_query() {
+  //获取查询条件的结构，包括，每个条件的查询条件，和验证函数的定义  
+  $filters = _or_chart_filters();
+   
+  // Build query
+  $where = $args = array();
+  $join = '';
+  //判断不同的session
+  if(is_array(getFilterConditionSession())){
+      foreach (getFilterConditionSession() as $index => $filter) {
+        list($key, $value) = $filter;
+        // Does the filter have query_build function?
+        if (isset($filters[$key]['query_build'])) {
+          $result = call_user_func($filters[$key]['query_build'], $key, $value, $index);
+          if (isset($result['where'])) {
+            $where[] = $result['where'];
+          }
+          if (isset($result['join'])) {
+            $join .= $result['join'] .' ';
+          }
+          if (isset($result['value'])) {
+            $value = $result['value'];
+          }
+        }
+        else {
+          // Does the filter have where and/or joins specified?
+          if (isset($filters[$key]['where'])) {
+            $where[] = $filters[$key]['where'];
+          }
+          if (isset($filters[$key]['join'])) {
+            $join .= $filters[$key]['join'] .' ';
+          }
+        }
+        //$tags = is_array($value) ? key($value) : $filters[$key]['tags']; 
+        if($filters[$key]['tags']=='d'){
+            $value = (int)$value;
+        }else if($filters[$key]['tags']=='s'){
+            $value = (string)$value;
+        }else if($filters[$key]['tags']=='like'){
+            $value = (string)"%".$value."%";
+        }
+        $args[] = $value;
+      }
+  }
+  
+  $where = count($where) ? 'WHERE '. implode(' AND ', $where) : '';
+  return array('where' => $where, 'join' => $join, 'args' => $args);
+}
+
+/**
+ * Query_build function for status field.
+ */
+function _or_chart_status_query_build($key, $value, $index) {
+  // Note: no exploitable hole as $key/$value have already been checked when submitted.
+  list($key, $value) = explode('-', $value, 2);
+  if ($key == 'sticky') {
+    // This allows sticky-encoded weighting (like Weight module) to also work.
+    return array(
+      'where' => "n.". $key .' '. ($value == 1 ? '>' : '<') ." ?",
+//      'value' => array('%d' => $value),
+        'value' => $value,
+      );
+  }
+  else {
+    return array(
+      'where' => "n.". $key ." = ?",
+//      'value' => array('%d' => $value),
+        'value' => $value,
+      );
+  }
+}
+
+
+/**
+ * 导出到 Excel 实际操作
+ * 
+ * @param type $result 
+ */
+function _or_chart_export_operation($form,$result){
+    $header = array();
+    $data = array();
+    define('__PHPEXCEL_PATH__', 'sites/all/libraries/Excel');
+    foreach($form['header']['#value'] as $key=>$value){ 
+        if(isset($value['field']) && !empty($value['field']))
+        $header[$value['field']] = $value['data'];
+    }
+    $header['url'] = '访问地址';
+    
+    //设置值
+    foreach ($result as $key => $nid) {
+        $query = "SELECT n.nid, n.title, n.status, n.created, "
+        ."n.changed, n.promote, n.sticky, n.tnid, "      
+        ."u.name AS username, u.uid, r.body_value body, "
+        ."c.totalcount, "    
+        ."case cs.comment_count when '' then 0 else cs.comment_count end AS commentcount "
+        ."FROM {node} n "
+        ."LEFT JOIN {field_data_body} r ON r.entity_id = n.nid "
+        ."INNER JOIN {users} u ON n.uid = u.uid "
+        ."LEFT JOIN {node_counter} c ON c.nid = n.nid "    
+        ."LEFT JOIN {node_comment_statistics} cs ON cs.nid = n.nid "    
+        .'where n.nid='.$nid; 
+        $res = db_query($query)->fetchAll();
+//            print_r($header); exit;
+        if(isset($header['nid']))
+         $data[$key]['nid'] = $res[0]->nid;
+         $data[$key]['title'] = $res[0]->title;
+         $data[$key]['username'] = $res[0]->username;
+         $data[$key]['created'] = date('Y-m-d',$res[0]->created);
+         $data[$key]['totalcount'] = isset($res[0]->totalcount) ? $res[0]->totalcount : 0;
+         $data[$key]['commentcount'] = $res[0]->commentcount ? $res[0]->commentcount : 0;
+         $data[$key]['url'] = $GLOBALS['base_url'].'/node/'.$res[0]->nid;
+
+         $status = array();
+         $status[] = $res[0]->status ? '发布' : '未发布';
+        if ($res[0]->promote) {
+          $status[] = '已推荐到首页';
+        }
+        // >0 allows for sticky-encoded weighting.
+        if ($res[0]->sticky > 0) {
+          $status[] = 'sticky';
+        }
+        $data[$key]['status'] = implode(', ', $status);
+    }  
+    $objPHPExcelc = custom_excel(variable_get('or_chart_phpexcel_path'),date('Y-m-d',time()).'骨科在线内容统计报表');
+    $objPHPExcelc->initHead($header)->initData($data);
+
+    $objPHPExcel = $objPHPExcelc->getPhpExcelClass();
+    //获取活动工作表
+    $objActSheet = $objPHPExcel->getActiveSheet(); 
+    //设置大标题
+    $objPHPExcel->setActiveSheetIndex(0)->setCellValueExplicit('A1', date('Y-m-d',time()).'骨科在线内容统计报表', PHPExcel_Cell_DataType::TYPE_STRING);
+    //设置字体  
+    $objStyleA1 = $objActSheet->getStyle('A1'); 
+    $objStyleA1  
+        ->getNumberFormat()  
+        ->setFormatCode(PHPExcel_Style_NumberFormat::FORMAT_NUMBER);  
+    $objFontA1 = $objStyleA1->getFont();  
+    $objFontA1->setName('Courier New');  
+    $objFontA1->setSize(20);  
+    $objFontA1->setBold(true);  
+    $objFontA1->getColor()->setARGB('000000000'); 
+
+    //设置当前活动sheet的名称  
+    $objActSheet->setTitle('骨科在线统计报表'); 
+    //设置宽度
+    $objActSheet->getColumnDimension('A')->setWidth(10);
+    $objActSheet->getColumnDimension('B')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('C')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('D')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('E')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('F')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('G')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('H')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('I')->setAutoSize(true);  
+//  $objActSheet->getColumnDimension('A')->setWidth(15);
+
+    //设置全文剧中对齐
+    $objStyleA5 = $objActSheet->getStyle('A1:I'.(count($data)+2));  
+    $objAlignA5 = $objStyleA5->getAlignment();  
+    $objAlignA5->setHorizontal(PHPExcel_Style_Alignment::HORIZONTAL_CENTER);  
+    $objAlignA5->setVertical(PHPExcel_Style_Alignment::VERTICAL_CENTER);  
+
+    //合并单元格
+    $objActSheet->mergeCells('A1:I1');  
+
+    $objStyleA5 = $objActSheet->getStyle('A1:I1');  
+    //设置填充颜色  
+    $objFillA5 = $objStyleA5->getFill();  
+    $objFillA5->setFillType(PHPExcel_Style_Fill::FILL_SOLID);  
+    $objFillA5->getStartColor()->setARGB('ee299229');
+
+    //设置字体  
+    $objStyleA5 = $objActSheet->getStyle('A2:I2'); 
+    $objStyleA5  
+        ->getNumberFormat()  
+        ->setFormatCode(PHPExcel_Style_NumberFormat::FORMAT_NUMBER);  
+    $objFontA5 = $objStyleA5->getFont();  
+    $objFontA5->setName('Courier New');  
+    $objFontA5->setSize(13);  
+    $objFontA5->setBold(true);  
+//  $objFontA5->setUnderline(PHPExcel_Style_Font::UNDERLINE_SINGLE);  
+    $objFontA5->getColor()->setARGB('000000000');  
+    //取出
+    $objPHPExcelc->execute(); exit;
+}
+
+/**
+ * hook_form_form_id_alter
+ * @param type $form
+ * @param type $form_state
+ * @param type $form_id
+ */
+function or_chart_form_taxonomy_form_term_alter(&$form,&$form_state,$form_id){
+    if($form['#vocabulary']->vid==  variable_get('or_chart_vid')){ 
+        if(@$form['name']['#default_value']!=''){
+            $form['actions']['submit']['#value'] = '更新';
+        }
+        $form['relations']['#access']=false;
+        $form['relations']['weight']['#access']=false;
+        $form['relations']['parent']['#access']=false;
+        $form['relations']['parent']['#default_value'][]=0;
+        $form['#validate'][] = 'or_chart_taxonomy_form_term_validate';
+    }
+    
+}
+
+/**
+ * taxonomy_form_term validate
+ * @param type $form
+ * @param type $form_state
+ */
+function or_chart_taxonomy_form_term_validate($form, &$form_state){
+  if($form['#vocabulary']->vid==  variable_get('or_chart_vid')){
+    if (isset($form_state['values']['name'])) {
+      $arr = taxonomy_get_term_by_name($form_state['values']['name']);  
+      if($form_state['values']['op']=='更新'){
+          if(count($arr)==1 || count($arr)==0){
+              
+          }else{
+              form_set_error('name', t('对不起，这个url地址已经存在!'));
+          }
+      }else if($form_state['values']['op']=='保存' && count($arr)!=0){
+          form_set_error('name', t('对不起，这个url地址已经存在!'));
+      }
+    }
+  }  
+}

@@ -1,0 +1,5 @@
+name = "friendlink"
+description = "friendlink"
+package = "heart"
+core = "7.x"
+dependencies[] = link
