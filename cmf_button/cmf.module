@@ -1,0 +1,1537 @@
+<?php
+/**
+ * @file
+ * @brief Content management filter module file
+ *
+ * This file contains all the common functions used by the module.
+ */
+
+/**
+ * Adding a new filter:
+ *
+ *  Add an entry to function cmf_filters. Read the docs at the top of that function.
+ *  If special form processing is needed (not likely), add it to function cmf_filter_form.
+ *  Add handling to cmf_filter_form_refine, if needed (not likely: submit/validate preferred).
+ *  Make sure all the database columns are present in cmf_perform_query.
+ *
+ * @TODO: Is it now possible to provide a hook to other contribs?
+ */
+
+/**
+ * Implementation of hook_help().
+ */
+function cmf_help($path, $arg) {
+  switch ($path) {
+    case "admin/help#cmf":
+      return '<p>'. t('This module adds an easier way for administrators to filter the content on a Drupal site for administration purposes.') .'</p>'
+        .'<p>'. t('It is an improvement over the content page in the administration area of Drupal. It can show on the same page nodes and comments and adds new filters like role and author.') .'</p>';
+  }
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function cmf_permission() {
+  return array(
+    // TODO : simplify machine name and update existing perms ?
+    'filter and manage site content' => array(
+      'title' => t('访问高级内容管理'),
+      'description' => t('访问高级内容管理'),
+    ),
+      
+    'view user content list' => array(
+      'title' => t('view user content list'),
+      'description' => t('view user content list'),
+    ),
+
+    'administer_cmf' => array(
+      'title' => t('administer cmf seetings'),
+      'description' => t('administer cmf seetings'),
+    ),
+
+    'use_cmf_operation' => array(
+      'title' => t('使用高级内容管理操作（发布，不发布，排序等）'),
+      'description' => t('使用高级内容管理操作（发布，不发布，排序等）'),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function cmf_menu() {
+  $items = array();
+
+  $items['admin/config/user-interface/cmf'] = array(
+    'title' => '高级内容管理配置',
+    'description' => '高级内容管理配置.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('cmf_settings'),
+    'access arguments' => array('administer_cmf'),
+    'file' => 'cmf.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/content/filter'] = array(
+    'title' => '内容管理',
+    'description' => 'All-in-one advanced filter and management of your site content.',
+    'page callback' => 'cmf_admin_content_page',
+    'page arguments' => '',  
+    'access arguments' => array('filter and manage site content'),
+    'type' => MENU_LOCAL_TASK | MENU_NORMAL_ITEM,
+  );
+
+  /*$items['user/%user/cmf'] = array(
+    'title' => 'CMF',
+    'description' => 'User-specific content management filter',
+    'page callback' => 'cmf_admin_content_page',
+    'page arguments' => array(1),
+    'access arguments' => array('view user content list'),
+    'type' => MENU_LOCAL_TASK,
+    );*/
+
+  $items['cmf/userauto'] = array(
+    'title' => 'User autocomplete',
+    'page callback' => '_cmf_user_autocomplete',
+    'access callback' => 'user_access',
+    'access arguments' => array('filter and manage site content'),
+    'type' => MENU_CALLBACK,
+  );
+
+    $items['cmf/getchildren'] = array(
+    'title' => 'get children',
+    'page callback' => 'getTaxChildren',
+    'access callback' => 'user_access',
+    'access arguments' => array('filter and manage site content'),
+    'file' => 'wjc.page.inc',
+    'type' => MENU_CALLBACK,
+    );
+
+  return $items;
+}
+
+/**
+ * Check user permissions to see menu item under example.com/user/UID/cmf
+ *
+ * @param access strings
+ * @param access strings
+ * @return boolean
+ */
+function _cmf_userspace_perms($manage_access, $view_access) {
+  return (user_access($manage_access) || user_access($view_access));
+}
+
+/**
+ * List node administration filters that can be applied.
+ *
+ * @param $user 
+ *  (object) if a user profile page then user object (defaults to false).
+ *
+ * @return array with filter properties.
+ *   Any property starting with '#' goes directly into the filter form.
+ *   '#options' is also used in function cmf_filter_form_submit.
+ *   'title' is the text that will show on the filter form.
+ *   'single_use' (bool) determines if the filter will be disabled if it is already in use.
+ *   'whole_value'  "before" if the value is complete and shown before "is",
+ *      "after" if the value is complete and shown after "is",
+ *      "no" if it is a portion ("contains"), such as a substring.
+ *   'disable' is a list of other filters to remove if this one is selected.
+ *   'where' sets a simple WHERE clause for the query (with substitution).
+ *   'join' sets a simple JOIN clause for the query (with substitution).
+ *   'query_build' provides a funtion for more complex query clauses.
+ *   If validation and/or submission handling is needed, use the #element_validate and #submit elements.
+ *   Submit handlers must set the return value in $form_state['values'] array.
+ *
+ *  NOTE: for the 'where' clause some node fields are translated to comment-equivalent
+ *   field names if appropriate. See function cmf_perform_query for 'comment' and 'both.'
+ */
+function cmf_filters($user = FALSE) { //unset($_SESSION['cmf_overview_filter']);
+  // Make the array static so it is built only once per page load.
+  static $filters;
+  if (isset($filters)) {
+    return $filters;
+  }
+
+  $filters = array();
+  // Regular filters.
+  $filters['status'] = array(
+    'title' => t('状态'),
+    'tags' => '',  
+    'single_use' => FALSE,
+    'whole_value' => 'before',
+    'query_build' => '_cmf_status_query_build',
+    '#type' => 'select',
+    '#options' => array(
+      'status-1' => t('published'),
+      'status-0' => t('not published'),
+      'promote-1' => t('promoted'),
+      'promote-0' => t('not promoted'),
+      // 'sticky-1'   => t('sticky'),
+      // 'sticky-0' => t('not sticky'),
+      ),
+    );
+  //一级栏目
+  $result = array();
+  $result = array_intersect(array_keys($GLOBALS['user']->roles),variable_get('cmf_one_type_settings'));
+  if(!empty($result) || $GLOBALS['user']->uid==1){
+    $first_column = taxonomy_get_tree(2,0,1);
+    $type_one = array();
+      if(count($first_column)>0){
+        foreach($first_column as $k=>$v){
+          $type_one[$v->tid] = $v->name;
+        }
+      }
+    $filters['type_one'] = array(
+      'title' => t('一级栏目'),
+      'single_use' => true,
+      'query_type_or' => '_cmf_type_in_build',
+      'whole_value' => 'before',
+      'where' => "n.type in ?",
+      'tags' => '',  
+      'disable' => array('type'),
+      '#type' => 'select',
+      '#options' => $type_one,
+    );
+  }
+
+  //二级栏目
+  //获取当前用户能操作的内容类型
+  $content_type = _get_access_content_type();
+  $content_type = _return_true_content_type($content_type);
+  $filters['type'] = array(
+    'title' => t('二级栏目'),
+    'single_use' => true,
+    'whole_value' => 'before',
+    'where' => "n.type = ?",
+    'tags' => 's',  
+    'disable' => array('type_one'),
+    '#type' => 'select',
+    '#options' => $content_type,
+  );
+
+  // Cmf filters.
+  $filters['title'] = array(
+    'title' => t('标题'),
+    'single_use' => FALSE,
+    'whole_value' => 'no',
+    'where' => "n.title LIKE ?",
+    'tags' => 'like',    
+    '#type' => 'textfield',
+    '#element_validate' => array('_cmf_contains_validate'),
+    );
+
+  $filters['body_contains'] = array(
+    'title' => t('内容'),
+    'single_use' => FALSE,
+    'whole_value' => 'no',
+    'where' => "r.body_value LIKE ?",
+    'tags' => 'like',    
+    '#type' => 'textfield',
+    '#element_validate' => array('_cmf_contains_validate'),
+    );
+
+  $filters['created_after'] = array(
+    'title' => t('该时间之后'),
+    'single_use' => TRUE,
+    'whole_value' => 'after',
+    'where' => "n.created >= ?",
+    'tags' => 'd',    
+    '#type' => 'date',
+    '#element_validate' => array('date_validate', '_cmf_date_validate'),
+    '#submit' => array('cmf_date_handler'),
+    '#default_value' => array('year' => date('Y'), 'month' => 1, 'day' => 1),
+    '#prefix' => '<div class="date-inline">',
+    '#suffix' => '</div>',
+    );
+
+  $filters['created_before'] = array(
+    'title' => t('该时间之前'),
+    'single_use' => TRUE,
+    'whole_value' => 'after',
+    'where' => "n.created <= ?",
+    'tags' => 'd',    
+    '#type' => 'date',
+    '#element_validate' => array('date_validate', '_cmf_date_validate'),
+    '#submit' => array('cmf_date_handler'),
+    '#default_value' => array('year' => date('Y'), 'month' => 12, 'day' => 31),
+    '#prefix' => '<div class="date-inline">',
+    '#suffix' => '</div>',
+    );
+
+  // Don't show these on a user page.
+  if (!_cmf_valid_user($user)) {
+   // $filters['user'] = array(
+   //   'title' => t('user list'),
+   //   'single_use' => TRUE,
+   //   'whole_value' => 'before',
+   //   'disable' => array('users', 'role', 'blocked'),
+   //   'where' => "u.uid = ?",
+   //   'tags' => 'd',    
+   //   '#type' => 'select',
+   //   '#options' => cmf_get_users('names'),
+   //   );
+
+
+    $filters['users'] = array(
+      'title' => t('添加人'),
+      'single_use' => TRUE,
+      'whole_value' => 'before',
+      'disable' => array('user', 'role', 'blocked'),
+      'where' => "u.name = ?",
+      'tags' => 's',    
+      '#type' => 'textfield',
+      '#submit' => array('cmf_users_handler'),
+      '#autocomplete_path' => 'cmf/userauto',
+      );
+
+    $filters['role'] = array(
+      'title' => t('用户角色'),
+      'single_use' => TRUE,
+      'whole_value' => 'before',
+      'where' => "u.uid = ur.uid AND ur.rid = ?",
+      'tags' => 'd',    
+      'join' => "INNER JOIN {users_roles} ur ON u.uid = ur.uid",
+      '#type' => 'select',
+      '#options' => cmf_get_roles('names'),
+      );
+
+  // The taxonomy filter.
+  if (module_exists('taxonomy')) {
+    $filters['category'] = array(
+      'title' => t('类别'),
+      'single_use' => TRUE,
+      'tags' => 'd',  
+      'whole_value' => 'before',
+      'query_build' => '_cmf_category_query_build',
+      '#type' => 'select',
+      '#attributes' =>array('lang'=>'selectt_1'),
+      '#options' => getTaxOne(),
+      '#prefix' => '<div id="taxdiv" style="position:relative;">',
+      '#suffix' => '</div>'  
+      );
+    
+    $filters['categoryhide'] = array(
+        'title' => t('categoryhide'),
+        '#type' => 'hidden',
+        '#attributes' =>array('id'=>'categoryhide'),
+        '#default_value' => -1,
+        '#prefix' => '<div id="categoryhd">',
+        '#suffix' => '</div>'
+    );
+  }
+    // $filters['blocked'] = array(
+    //   'title' => t('user status'),
+    //   'single_use' => TRUE,
+    //   'whole_value' => 'before',
+    //   'where' => "u.status = ? AND u.uid != 0",
+    //   'tags' => 'd',    
+    //   '#type' => 'select',
+    //   '#options' => array(1 => t('active'), 0 => t('blocked')),
+    //   );
+  }
+  drupal_alter('cmf_filters', $filters);
+  return $filters;
+}
+
+function _return_true_content_type($cc){
+  $ccarr = array();
+  foreach ($cc as $key => $value) {
+    if($value){
+      $name = db_query('select name from {node_type} where type = :type',array(':type'=>$value))->fetchField();
+      $ccarr[$key] = $name;
+    }
+  }
+  return $ccarr;
+}
+
+/**
+ * Called when user goes to example.com/admin/content/filter
+ *
+ * @return the HTML generated from the $form data structure
+ */
+function cmf_admin_content_page($user = NULL) { 
+  drupal_set_title('内容管理'); 
+  if (!isset($_SESSION['cmf_content_kind'])) {
+    $_SESSION['cmf_content_kind'] = 'node';
+  }
+  if (!isset($_SESSION['cmf_show_nid'])) {
+    $_SESSION['cmf_show_nid'] = 1;
+  } 
+  $output = '';
+  $cff = drupal_get_form('cmf_filter_form', $user); 
+  $output = drupal_render($cff); 
+  // Call the form first, to allow for the form_val es array to be populated.
+  switch ($_SESSION['cmf_content_kind']) {
+    case 'node':
+      if (isset($_POST['operation']) && $_POST['operation'] == 'delete' && $_POST['nodes']) {
+        module_load_include('inc', 'node', 'node.admin');
+        return drupal_get_form('node_multiple_delete_confirm', $_POST['nodes']);
+      }
+      else {  
+        $canf = drupal_get_form('cmf_admin_nodes_form', $user);     
+        $output .= drupal_render($canf);
+      }
+      break;
+
+    case 'comment':
+      if (isset($_POST['operation']) && $_POST['operation'] == 'delete' && $_POST['comments']) {
+        // The next line is because of http://drupal.org/node/521354.
+        module_load_include('inc', 'comment', 'comment.admin');
+        return drupal_get_form('comment_multiple_delete_confirm');
+      }
+      else { 
+        $commf = drupal_get_form('cmf_admin_comments_form', $user); 
+        // wjcPrint($commf);
+        $output .= drupal_render($commf);
+      }
+      break;
+
+    case 'both':
+      $output += drupal_get_form('cmf_admin_both_form', $user);
+  }
+  drupal_add_js(drupal_get_path('module', 'cmf').'/wjc.page.js'); 
+  return $output.'<input type="hidden" id="basepath" value="'.base_path().'">';
+}
+
+
+/**
+ * FILTERS
+ */
+/**
+ * Defines the form for content administration filters.
+ *
+ * @ingroup forms
+ *
+ * @param (optional) true if the filter to be built serves the user profile page
+ * @return array with forms properties
+ */
+function cmf_filter_form($form, &$form_state) {  
+  //调用提示信息  
+  $session = &$_SESSION['cmf_overview_filter'];
+  $session = is_array($session) ? $session : array();
+  $user = is_object($form_state['build_info']['args'][0]);
+  $filters = cmf_filters($user);
+  drupal_add_css(drupal_get_path('module', 'cmf') .'/cmf.css');
+  drupal_add_js(drupal_get_path('module', 'cmf') .'/cmf.jquery.js');
+  
+  //标记是否使用用户搜索条件
+  $form['#user_page_user'] = is_object($user) ? $user : NULL;
+  
+  // General settings display (max rows & content kind).
+  $form['general'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('基本设置'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    );
+
+  $form['general']['max-rows'] = array(
+    '#type' => 'textfield',
+    '#title' => t('每页显示条数'),
+    '#size' => 5,
+    '#default_value' => isset($_SESSION['cmf_max_rows']) ? $_SESSION['cmf_max_rows'] : 50,
+    '#prefix' => '<div class="container-inline">',
+    '#suffix' => '</div>',
+    );
+
+  $form['general']['show_nid'] = array(
+    '#type' => 'radios',
+    '#title' => t('内容id'),
+    '#options' => array(0 => t('不显示'), 1 => t('显示')),
+    '#default_value' => isset($_SESSION['cmf_show_nid']) ? $_SESSION['cmf_show_nid'] : 0,
+    '#prefix' => '<div class="container-inline"><div class="cmf-radios">',
+    '#suffix' => '</div></div><div class="clear-block"></div>',
+    );
+
+  $form['general']['kind'] = array(
+    '#type' => 'select',
+    // '#type' => 'hidden',
+    '#title' => t('查询类型'),
+    // '#options' => array('node' => t('node'), 'comment' => t('comment'), 'both' => t('both')),
+    '#options' => array('node' => t('内容'), 'comment' => t('评论')),
+    '#default_value' => isset($_SESSION['cmf_content_kind']) ? $_SESSION['cmf_content_kind'] : 'node',
+    '#prefix' => '<div class="container-inline">',
+    );
+
+
+  $form['general']['buttons']['apply'] = array(
+    '#type' => 'submit',
+    '#value' => t('设置'),
+    '#submit' => array('cmf_filter_form_apply'),
+    '#suffix' => '</div>',
+    );
+// return $form;
+  $i = 0;
+  $form['filters'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Show only items where'),
+//    '#theme' => 'node_filters',
+    ); 
+ 
+  
+  //add notice  info
+  foreach ($session as $filter) { 
+    list($type, $value) = $filter;
+    // Special handling by type of filter.
+    switch ($type) {
+      case 'category':
+        // Load term name from DB rather than search and parse options array.
+        $value = taxonomy_term_load($value);
+        $value = isset($value->name) ? $value->name : '';
+        break;
+
+      case 'body_contains':
+      case 'title':
+        // Add quotes.
+        $value = "'". $value ."'";
+        break;
+
+      case 'created_after':
+      case 'created_before':
+        // Format as human date.
+        $fmt = variable_get('date_format_short', variable_get('date_format_short_custom', 'Y M j'));
+        $fmt = trim(str_replace(array('H', 'i', ':'), '', $fmt));
+        $value = format_date($value, 'custom', $fmt);
+        break;
+
+      default:
+        if (isset($filters[$type]['#options'])) {
+          $value = $filters[$type]['#options'][$value];
+        }
+    }
+
+    // Add applicable filter verbiage. Note '@' and '%' do check_plain.
+    $trans_strings = array(
+      '%filter_name' => $filters[$type]['title'],
+      '%filter_value' => $value,
+      );
+    if ($i++) {
+      $and = '<br><em>'. t('并且') .'</em> ';
+    }
+    else {
+      $and = NULL;
+    }
+    
+    //after  before 是指的is 是在前还是在后
+    switch ($filters[$type]['whole_value']) {
+      case 'after':
+        $form['filters']['current'][] = array('#type'=>'markup', '#markup' => $and . t('是 %filter_name %filter_value', $trans_strings));
+        break;
+
+      case 'before':
+        $form['filters']['current'][] = array('#type'=>'markup', '#markup' => $and . t('%filter_name 等于 %filter_value', $trans_strings));
+        break;
+
+      case 'no':
+        $form['filters']['current'][] = array('#type'=>'markup', '#markup' => $and . t('%filter_name 包含 %filter_value', $trans_strings));
+        break;
+    }
+
+    // Remove mutually exclusive filters.
+    if (isset($filters[$type]['disable'])) {
+      foreach ($filters[$type]['disable'] as $exclude) {
+        unset($filters[$exclude]);
+      }
+    }
+
+    // Remove the single use option if it is already being filtered on.
+    if ($type == 'status') {
+//      drupal_set_message('okay, what do I get rid of? '. print_r($filter,true));
+//      dsm(print_r($filters['status'],true));
+      // Strip current value, then unset both values.
+      $status = drupal_substr($filter[1], 0, -1);
+      unset ($filters['status']['#options'][$status.'0'], $filters['status']['#options'][$status.'1']);
+    }
+
+    //如果已经被查询了，那么就删除
+    if (isset($filters[$type]['single_use'])) {
+      unset($filters[$type]);
+    }
+  }
+
+  // Prepare form fields for filters.
+  $sids = '';
+  foreach ($filters as $key => $filter) {
+     if($filter['#type']!='hidden'){  
+        $names[$key] = $filter['title'];
+        $sids .= '#edit-'.str_replace('_','-',$key).',';
+     }  
+        // Normal form field handling.
+        $form['filters']['status'][$key] = array();
+        foreach ($filter as $element => $value) { 
+          // If the filter element name begins with '#' then it is for the form.
+          if (drupal_substr($element, 0, 1) == '#') {  
+            $form['filters']['status'][$key][$element] = $value;
+          }
+      }  
+  } 
+  $sids = substr($sids,0,strlen($sids)-1);
+  drupal_add_js(array('data'=>array('cmf'=>array('clickid'=>$sids))),'setting');
+
+  // Building radio buttons.
+  $keyz = array_keys($names); 
+  $form['filters']['filter'] = array(
+    '#type'          => 'radios',
+    '#options'       => $names,
+    '#default_value' => $keyz[0],
+    '#attributes' => array('class' => array('multiselect')),
+  );
+
+  // Building buttons depending on the filter state.
+  $form['filters']['buttons']['submit'] = array(
+    '#type'  => 'submit',
+    '#value' => (count($session) ? t('Refine') : t('Filter')),
+    '#submit' => array('cmf_filter_form_refine'),
+    );
+
+  if (count($session)) {
+    $form['filters']['buttons']['undo'] = array(
+      '#type' => 'submit',
+      '#submit' => array('cmf_filter_form_undo'),
+      '#value' => t('Undo'),
+    );
+    $form['filters']['buttons']['reset'] = array(
+      '#type' => 'submit',
+      '#submit' => array('cmf_filter_form_reset'),
+      '#value' => t('Reset'),
+    );
+  }  
+  return $form;
+}
+
+/**
+ * Handle post-validation form submission.
+ *
+ * @ingroup forms
+ *
+ * @param the ID of the passed form
+ * @param array with the form properties values
+ */
+function cmf_filter_form_refine($form, &$form_state) {
+  $filters = cmf_filters();
+  if (isset($form_state['values']['filter'])) {
+    $filter = $form_state['values']['filter'];
+    // Convert AJAX search value to select box value.
+
+    // If a filter has specified a submit function, call it. (Only allow one value.)
+    if (isset($filters[$filter]['#submit'])) {
+      $form_state['values'][$filter] = call_user_func($filters[$filter]['#submit'][0], $form, $form_state);
+    }
+    // Repeating this allows submit handlers (e.g. users) to alter the filter name.
+    $filter = $form_state['values']['filter'];
+
+    // Flatten the options array to accommodate hierarchical/nested options.
+    // If there are no options, fake it.
+    if (isset($filters[$filter]['#options'])) {
+      $flat_options = form_options_flatten($filters[$filter]['#options']);
+    }
+    else {
+      $flat_options = array($form_state['values'][$filter] => 1);
+    }
+    // If the option is selected or there are no options, set the session value.
+    if (isset($flat_options[$form_state['values'][$filter]])) {
+      //如果为过滤条件那么选取隐藏值做为查询值
+
+      if($filter=='category'){
+        $_SESSION['cmf_overview_filter'][] = array($filter, $form_state['values']['categoryhide']);
+      }else{
+        $_SESSION['cmf_overview_filter'][] = array($filter, $form_state['values'][$filter]);
+      }
+    } 
+  }
+}
+
+/**
+ * Submit handler for 'Undo' button.
+ */
+function cmf_filter_form_undo($form, &$form_state) {
+  array_pop($_SESSION['cmf_overview_filter']);
+}
+
+/**
+ * Submit handler for 'Reset' button.
+ */
+function cmf_filter_form_reset($form, &$form_state) {
+  $_SESSION['cmf_overview_filter'] = array();
+}
+
+/**
+ * Submit handler for 'Apply' button.
+ */
+function cmf_filter_form_apply($form, &$form_state) {
+  $_SESSION['cmf_max_rows'] = $form_state['values']['max-rows'];
+  $_SESSION['cmf_show_nid'] = $form_state['values']['show_nid'];
+  $_SESSION['cmf_content_kind'] = $form_state['values']['kind'];
+
+  $user = $form['#user_page_user'];
+  
+  if (_cmf_valid_user($user)) {
+    $form_state['redirect'] = 'user/'. $user->uid .'/cmf';
+  }
+  else {
+    $form_state['redirect'] = 'admin/content/filter';
+  }
+}
+
+function _cmf_valid_user($user) {
+  if (!empty($user->uid)) {
+    return TRUE;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Validation handler for filter doing "contains".
+ */
+function _cmf_contains_validate($form) {
+  // Make sure this was triggered by the selected filter.
+  if ($form['#name'] == @$form['#post']['filter']) {
+    // Strip blanks to see if the field is empty.
+    $value = trim($form['#value']);
+    if (empty($value)) {
+      form_error($form, t('%name text value may not be empty.', array('%name' => $form['#name'])));
+    }
+  }
+}
+
+/**
+ * Validation handler for filter doing "dates".
+ */
+function _cmf_date_validate($form) {  
+  // Make sure this was triggered by the selected filter.
+  if ($form['#name'] != @$form['#post']['filter']) {
+    return;
+  }
+
+  // Determine correct time values depending on the filter name.
+  if (strpos($form['#name'], 'before') === FALSE) {
+    $entered_date = mktime(0, 0, 0, (int)$form['#value']['month'], (int)$form['#value']['day'], (int)$form['#value']['year'], 1);
+  }
+  else {
+    $entered_date = mktime(11, 59, 59, (int)$form['#value']['month'], (int)$form['#value']['day'], (int)$form['#value']['year'], 1);
+  }
+
+// drupal_set_message('_cmf_date_validate, filter='.$form['#post']['filter'].', name='.$form['#name'].' '.print_r($form['#value'], true).', calc='.format_date($entered_date));
+// drupal_set_message('current filters='.print_r($_SESSION['cmf_overview_filter'], true));
+
+  if (empty($entered_date)) {
+    form_error($form, t('%name date value may not be empty.', array('%name' => $form['#name'])));
+  }
+}
+
+function cmf_typeone_handler($form, &$form_state){
+  return '("news","interview")';
+}
+
+/**
+ * Submit handler for 'users' filter.
+ * Ignore the Coder flag - it is a false positive.
+ */
+function cmf_users_handler($form, &$form_state) {
+  $name = $form_state['values']['users']; 
+  // Get uid to put in 'user' filter value.
+  $form_state['values']['user'] = db_query('SELECT uid FROM {users} WHERE name = ?', array($name))->fetchField();
+  // Switch filter type to user.
+  $form_state['values']['filter'] = 'user';
+  return $name;
+}
+
+/**
+ * Submit handler for date filters.
+ * Ignore the Coder flag - it is a false positive.
+ */
+function cmf_date_handler($form, &$form_state) {
+  $filter = $form_state['values']['filter'];
+  return gmmktime(0, 0, 0, $form_state['values'][$filter]['month'], $form_state['values'][$filter]['day'], $form_state['values'][$filter]['year']);
+}
+
+/**
+ * Theme cmf administration filter form.
+ *
+ * @themable
+ */
+function theme_cmf_filter_form($form) { 
+  $form['form']['filters']['status']['status']['#id'] = 'edit-status';
+  return '<div id="cmf_header">'. drupal_render($form['form']['general']) .'</div><div id="headerafter"></div>'
+    .'<div id="main-filters"><div id="node-admin-filter-filter">'.render($form['form']['filters']['filter']) .'</div>'
+    .'<div id="node-admin-filter-status">'.render($form['form']['filters']['status']) .'</div></div>'      
+    .'<div id="node-admin-filter-result">'.drupal_render_children($form['form']).'</div><div class="clearfix"></div>'; 
+}
+
+/**
+ *  QUERIES
+ */
+/**
+ * Build the variable parts of the query to be performed regarding the filter status.
+ *
+ * @return associative array with WHERE JOIN query parts and respective arguments
+ */
+function cmf_build_filter_query() { 
+  //获取查询条件的结构，包括，每个条件的查询条件，和验证函数的定义  
+  $filters = cmf_filters();
+
+  // Build query
+  $where = $args = array();
+  $join = '';
+
+  foreach ($_SESSION['cmf_overview_filter'] as $index => $filter) { 
+    list($key, $value) = $filter;
+    // Does the filter have query_build function?
+    if (isset($filters[$key]['query_build'])) {
+      $result = call_user_func($filters[$key]['query_build'], $key, $value, $index);
+      if (isset($result['where'])) {
+        $where[] = $result['where'];
+      }
+      if (isset($result['join'])) {
+        $join .= $result['join'] .' ';
+      }
+      if (isset($result['value'])) {
+        $value = $result['value'];
+      }
+    } else if(isset($filters[$key]['query_type_or'])){
+      $result = call_user_func($filters[$key]['query_type_or'], $key, $value, $index);
+      if (isset($result['where'])) {
+        $where[] = $result['where'];
+      }
+      if (isset($result['value'])) {
+        $value = $result['value'];
+      }
+    }
+    else {
+      // Does the filter have where and/or joins specified?
+      if (isset($filters[$key]['where'])) {
+        $where[] = $filters[$key]['where'];
+      }
+      if (isset($filters[$key]['join'])) {
+        $join .= $filters[$key]['join'] .' ';
+      }
+    }
+    //$tags = is_array($value) ? key($value) : $filters[$key]['tags']; 
+    if($filters[$key]['tags']=='d'){
+        $value = (int)$value;
+    }else if($filters[$key]['tags']=='s'){
+        $value = (string)$value;
+    }else if($filters[$key]['tags']=='like'){
+        $value = (string)"%".$value."%";
+    }
+    if(is_array($value)){
+      foreach ($value as $key => $v) {
+        $args[] = $v;
+      }
+    }else{
+      $args[] = $value;
+    }
+    
+  } 
+  $where = count($where) ? 'WHERE '. implode(' AND ', $where) : ''; 
+  return array('where' => $where, 'join' => $join, 'args' => $args);
+}
+
+function _cmf_type_in_build($key, $value, $index) {
+  $typearr = get_article_term($value);
+  return _generation_where_value($typearr);
+}
+
+function _generation_where_value($typearr){
+  $where = array();
+  foreach ($typearr as $key => $value) {
+    $where[]='n.type = ?';
+  }
+  return array(
+    'where' => "(".implode(' or ', $where).")",
+    'value' => $typearr,  
+    );
+}
+
+/**
+ * Query_build function for category field.
+ */
+function _cmf_category_query_build($key, $value, $index) {
+  $table = "tn$index";
+  return array(
+    'where' => "$table.tid = ?",
+    'join' => "INNER JOIN {taxonomy_index} $table ON n.nid = $table.nid ",
+//    'value' => array('%d' => $value),
+    'value' => $value,  
+    );
+}
+
+/**
+ * Query_build function for status field.
+ */
+function _cmf_status_query_build($key, $value, $index) {
+  // Note: no exploitable hole as $key/$value have already been checked when submitted.
+  list($key, $value) = explode('-', $value, 2);
+  if ($key == 'sticky') {
+    // This allows sticky-encoded weighting (like Weight module) to also work.
+    return array(
+      'where' => "n.". $key .' '. ($value == 1 ? '>' : '<') ." ?",
+//      'value' => array('%d' => $value),
+        'value' => $value,
+      );
+  }
+  else {
+    return array(
+      'where' => "n.". $key ." = ?",
+//      'value' => array('%d' => $value),
+        'value' => $value,
+      );
+  }
+}
+
+/**
+ * Build the header of the result table.
+ *
+ * @param $user_page_user
+ *    if we are on a user page, the user that page belongs to, not the current user
+ *
+ * @return array respecting tablesort_sql()
+ */
+function cmf_build_header($user_page_user = NULL) {
+
+  $header = array();
+  if (user_access('filter and manage site content')) { 
+    //$header[] = theme('table_select_header_cell');
+  }
+
+  if ($_SESSION['cmf_show_nid']) {
+    $header[] = array('data' => t('ID'), 'field' => 'nid');
+  }
+
+  switch ($_SESSION['cmf_content_kind']) {
+    case 'node':
+      $header[] = array('data' => t('标题'), 'field' => 'title');
+      $header[] = array('data' => t('标题类型'));
+      // $header[] = array('data' => t('内容性质'));
+      $header[] = array('data' => t('所属栏目'));
+      if (!_cmf_valid_user($user_page_user)) {
+        $header[] = array('data' => t('添加人'));
+      }
+      $header[] = array('data' => t('状态'), 'field' => 'status');
+      $header[] = array('data' => t('添加时间'), 'field' => 'created', 'sort' => 'desc');
+//      if (module_exists('locale')) {
+//        $header[] = array('data' => t('语言'), 'field' => 'language');
+//      }
+      if ($_SESSION['cmf_content_kind']) {
+        $header[] = array('data' => t('访问量'), 'field' => 'totalcount');
+        $header[] = array('data' => t('评论数'), 'field' => 'commentcount');
+      }
+      $header[] = array('data' => t('首页排序'), 'field' => 'sortnum', 'sort' => 'desc');
+      $header[] = array('data' => t('亚专科排序'), 'field' => 'sortnum2', 'sort' => 'desc');
+      $header[] = array('data' => t('栏目排序'), 'field' => 'sortnum3', 'sort' => 'desc');
+      break;
+
+    case 'comment':
+      $header[] = array('data' => t('评论内容'), 'field' => 'subject');
+      $header[] = array('data' => t('内容性质'));
+      $header[] = array('data' => t('文章类型'), 'field' => 'type');
+      if (!_cmf_valid_user($user_page_user)) {
+        $header[] = array('data' => t('作者'), 'field' => 'username');
+      }
+      $header[] = array('data' => t('状态'), 'field' => 'status');
+      $header[] = array('data' => t('创建时间'), 'field' => 'created', 'sort' => 'desc');
+      break;
+
+    case 'both':
+      $header[] = array('data' => t('标题') .'/'. t('Subject'), 'field' => 'title');
+      $header[] = array('data' => t('内容性质'));
+      $header[] = array('data' => t('文章类型'), 'field' => 'type');
+      if (!_cmf_valid_user($user_page_user)) {
+        $header[] = array('data' => t('作者'), 'field' => 'username');
+      }
+      $header[] = array('data' => t('状态'), 'field' => 'status');
+      $header[] = array('data' => t('创建时间'), 'field' => 'created', 'sort' => 'desc');
+
+      break;
+  }
+  if (user_access('filter and manage site content')) {
+    $header[] = array('data' => t('操作'));
+  }
+
+  //add table select all
+  drupal_add_js('misc/tableselect.js');
+  array_unshift($header, array('class' => array('select-all')));
+  return $header;
+}
+
+/**
+* 在d6中移植过来的方法
+*/
+function tablesort_sql($header, $before = '') {
+  $ts = tablesort_init($header);
+  if ($ts['sql']) {
+    // Based on code from db_escape_table(), but this can also contain a dot.
+    $field = preg_replace('/[^A-Za-z0-9_.]+/', '', $ts['sql']);
+
+    // Sort order can only be ASC or DESC.
+    $sort = drupal_strtoupper($ts['sort']);
+    $sort = in_array($sort, array('ASC', 'DESC')) ? $sort : '';
+    return " ORDER BY $before $field $sort";
+  }
+}
+
+/**
+ * Perform adjusted query.
+ * 
+ * @param $user_page_user
+ *    if we are on a user page, the user that page belongs to, not the current user
+ *
+ *
+ * @param array respecting tablesort_sql()
+ * @return result of permormed query
+ */
+function cmf_perform_query($header, $kind = NULL, $user_page_user = NULL) {  
+  // unset($_SESSION['cmf_overview_filter']);
+  //获取参数 where join args   
+  $filter = cmf_build_filter_query();
+  if (is_null($kind)) {
+    $kind = $_SESSION['cmf_content_kind'];
+  } 
+  
+  $where = ' '. $filter['where'];
+  //添加自定义where条件
+  //如果查询的内容为空，或者没有选择内容类型作为过滤条件，则制定某些内容类型进行过滤
+  if($where==' ' || !_check_have_type_for_filter(array('type','type_one'))){ 
+    $content_type = _get_access_content_type();
+    $content_type = _return_true_content_type($content_type);
+    $condition = _generation_where_value($content_type);
+    if($where==' '){
+      $where = 'where '.$condition['where'];
+      $filter['args'] = array_keys($condition['value']); 
+    }else{
+      $where = $where.' AND '.$condition['where'];
+      $filter['args'] = array_merge($filter['args'],array_keys($condition['value'])); 
+    }
+  }  
+  //针对某个用户添加查询条件
+  if (_cmf_valid_user($user_page_user)) {
+    $where .= ' AND u.uid = '. $user_page_user->uid;
+  }
+  $cwhere = str_replace(array('n.title', 'n.uid', 'r.body'), array('c.subject', 'c.uid', 'c.comment'), $where);
+
+  switch ($kind) {
+    case 'node':
+      $query = "SELECT n.nid, n.title, n.type, n.status, n.created, "
+        //."n.changed, n.promote, n.sticky, n.moderate, n.language, "
+        ."n.changed, n.promote, n.sticky, n.tnid, "      
+        ."u.name AS username, u.uid, r.body_value body, "
+        ."c.totalcount, "
+        ."ty.field_title_type_tid as title_type, "    
+        ."fs.field_sort_value as sortnum, "    
+        ."fs2.field_sort_2_value as sortnum2, "    
+        ."fs3.field_sort_3_value as sortnum3, "    
+        ."case cs.comment_count when '' then 0 end AS commentcount " 
+        //."u.name AS username, u.uid "       
+        ."FROM {node} n "
+//        ."LEFT JOIN {field_revision_body} r ON r.revision_id = n.vid "
+        ."LEFT JOIN {field_data_body} r ON r.entity_id = n.nid "
+        ."LEFT JOIN {field_data_field_title_type} ty ON ty.entity_id = n.nid "
+        ."INNER JOIN {users} u ON n.uid = u.uid "
+        ."LEFT JOIN {node_counter} c ON c.nid = n.nid "    
+        ."LEFT JOIN {node_comment_statistics} cs ON cs.nid = n.nid "
+        ."LEFT JOIN {field_data_field_sort} fs ON fs.entity_id = n.nid "
+        ."LEFT JOIN {field_data_field_sort_2} fs2 ON fs2.entity_id = n.nid "
+        ."LEFT JOIN {field_data_field_sort_3} fs3 ON fs3.entity_id = n.nid "
+        . $filter['join']
+        . $where
+        . tablesort_sql($header);
+        $limit = isset($_SESSION['cmf_max_rows']) ? $_SESSION['cmf_max_rows'] : 50;
+        $page = pager_default_initialize(count(db_query($query,$filter['args'])->fetchAll()), $limit);
+        $offset = $limit * $page;
+        $result = db_query_range($query, $offset, $limit, $filter['args']);
+        return $result;
+      break;
+
+    case 'comment':
+      $query = "SELECT c.cid, c.subject,cb.comment_body_value AS comment, c.nid, c.created, "
+        ."c.status, c.name, c.homepage, u.name AS username, u.uid, n.type, cb.comment_body_value AS body "
+        ."FROM {comment} c "
+        ."INNER JOIN {node} n ON c.nid = n.nid "
+        ."INNER JOIN {users} u ON u.uid = c.uid "
+        ."LEFT JOIN {field_data_comment_body} cb ON c.cid = cb.entity_id " 
+        . $filter['join']
+        . $cwhere
+        . tablesort_sql($header);
+        $limit = isset($_SESSION['cmf_max_rows']) ? $_SESSION['cmf_max_rows'] : 50;
+        $page = pager_default_initialize(count(db_query($query,$filter['args'])->fetchAll()), $limit);
+        $offset = $limit * $page;
+        $result = db_query_range($query, $offset, $limit, $filter['args']);
+        return $result;
+    
+      break;
+  }
+}
+
+/**
+ *  RESULTS
+ */
+module_load_include('inc', 'cmf', '/node');
+module_load_include('inc', 'cmf', '/comment');
+module_load_include('inc', 'cmf', '/both');
+module_load_include('inc', 'cmf', '/wjc.page');
+/*
+ *  AUX
+ */
+/**
+ * Builds a list of available users.
+ *
+ * @param the format in which to return the list
+ * @return array of all available users
+ */
+function cmf_get_users($op) {
+  switch ($op) {
+    case 'names': 
+      $result = db_query('SELECT uid, name FROM {users} WHERE uid <> 0 ORDER BY name');
+      break;
+  }
+
+  $users = array();
+ if(is_object($result)){
+   while ($account = $result->fetchObject()) {     
+       $users[$account->uid] = $account->name;
+   }
+ }
+
+  return $users;
+}
+
+/**
+ * Menu callback; Retrieve a JSON object containing autocomplete suggestions for existing users.
+ */
+function _cmf_user_autocomplete($string = '') {
+  $matches = array();
+  if ($string) {
+     $result = db_select('{users}', 'u');
+     $result->condition('u.name', '%'.db_like($string).'%', 'like');
+     $result->addField('u', 'name');
+    $result = $result->execute();
+    while ($account = $result->fetchObject()) {
+      $matches[$account->name] = check_plain($account->name);
+    }
+  }
+  drupal_json_output($matches);
+}
+
+/**
+ * Builds a list of available roles
+ *
+ * @param the format in which to return the list
+ * @return array of all available roles
+ */
+function cmf_get_roles($op) {
+  switch ($op) {
+    case 'names':
+      $result = db_query('SELECT rid, name FROM {role} where rid not in(1,2,3) ORDER BY name');
+      break;
+  }
+  $roles = array();
+  while ($role = $result->fetchAssoc()) {     
+    $roles[$role['rid']] = $role['name'];
+  }
+  return $roles;
+}
+
+/**
+ * Get the html code of an image
+ *
+ * @param the pretended image
+ * @return html tag img
+ */
+function _cmf_get_img($action, $title) {
+  $path =  base_path() . drupal_get_path('module', 'cmf') .'/images/'. $action .'.png';
+  if ($title == NULL) {
+    $html = '<img src="'. $path .'" alt="untitled image" />';
+  }
+  else {
+    $html = '<img src="'. $path .'" title="'. $title .'" alt="'. $title .'" />';
+  }
+  return $html;
+}
+
+function _cmf_get_title_type($tid){
+  $tarr = taxonomy_term_load($tid);
+  return isset($tarr->name) ? $tarr->name : '无';
+}
+
+/**
+ * Theme (node) type cell on table result.
+ *
+ * @ingroup themable
+ *
+ * @param 0 or node type key
+ * @return formated (node) type
+ */
+function theme_cmf_type($type) { 
+  return db_query("SELECT name FROM {node_type} WHERE type = ?",  array($type['type']))->fetchField();
+}
+
+/**
+ * Implementation of hook_theme().
+ *
+ * @ingroup themable
+ */
+function cmf_theme() {
+  return array(
+    'cmf_filter_form' => array(
+        'render element' => 'form',
+      ),
+    'cmf_user' => array(
+        'variables' => array('uid' => NULL),
+      ),
+    'cmf_type' => array(
+        'variables' => array('type' => NULL),
+      ),
+    'cmf_admin_nodes_form' => array(
+         'render element' => 'form',
+         'file' => 'node.inc',
+      ),
+    'cmf_admin_comments_form' => array(
+        'render element' => 'form',
+        'file' => 'comment.inc',
+      ),
+    'cmf_admin_both_form' => array(
+        'render element' => 'form',
+        'file' => 'both.inc',
+      ),
+  );
+}
+
+/**
+ * Theme user cell on table result.
+ *
+ * @ingroup themable
+ *
+ * @param user ID
+ * @return clickable username with status
+ */
+function theme_cmf_user($variables) {
+  $uid = $variables['uid'];
+  if ($uid == 0 || !isset($uid)) {
+    return variable_get('anonymous', t('anonymous'));
+  }
+  $result = db_query('SELECT name, status FROM {users} WHERE uid = :d', array(':d'=>$uid));
+  $user = $result->fetchAssoc();
+  $url_alias = _cmf_get_user_path($uid);
+
+  $display = $user['status'] ? $user['name'] : _cmf_get_img('blocked', t('blocked')) .' '. $user['name'];
+  if (user_access('access user profiles')) {
+    //$url = $url_alias ? $url_alias : 'user/'. $uid;
+    //$output = l($display, $url, array('html' => TRUE));
+    $output = $user['name'];
+  }
+  else {
+    $output = $display;
+  }
+  return $output;
+}
+
+/**
+ * Get the alias path to a user profile
+ *
+ * @param user ID
+ * @return the relative URL of the user profile
+ */
+function _cmf_get_user_path($uid) {
+  return db_query("
+    SELECT alias
+    FROM {url_alias}
+    WHERE source = '%s';",
+    array('%s'=>'user/'. $uid)
+  )->fetchField();
+}
+
+/**
+ * Get the term for a forum node
+ *
+ * @param node ID
+ * @return the name and forum description
+ */
+function _cmf_get_forum($nid) {
+  $path = array();
+  $node = node_load($nid); 
+  $parents = taxonomy_get_parents_all($node->tid);
+  foreach ($parents as $parent) {
+    $path[] = $parent->name;
+  }
+  return implode(' > ', array_reverse($path));
+}
+
+function cmf_get_workflows() {
+  if (!module_exists('workflow')) return;  
+  if (!function_exists('workflow_load_all')) return;
+  
+  $workflows = workflow_load_all();
+  
+  $states = array();
+  if (is_array($workflows)) {
+    foreach ($workflows as $workflow) {
+      if (is_array($workflow->states)) {
+        foreach ($workflow->states as $state) {
+          $states[$state->name] = $workflow->label . " : " . $state->label;
+        }
+      }
+    }
+  }
+  
+  return $states;
+  
+}
+
+/**
+ * Query_build function for workflow
+ */
+function _cmf_workflow_query_build($key, $value, $index) {
+  if (!module_exists('workflow')) return;  
+  if (!function_exists('workflow_load_all')) return;
+
+  $table = "workflow_node";
+  return array(
+    'where' => "$table.state_name = '%s'",
+    'join' => "INNER JOIN {$table} $table ON n.nid = $table.nid ",
+    'value' => $value,
+    );
+}
+
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function cmf_form_alter(&$form, $form_state, $form_id) {
+
+  switch ($form_id) {
+
+    // When CMF is only showing nodes or only showing comments, the deletion is handled by
+    // re-using the multiple delete functions provided by node module and comment module.
+    case 'node_multiple_delete_confirm':
+    case 'comment_multiple_delete_confirm':
+      // The target page after deleting is set in the corresponding submit function so we need
+      // to add another submit function which will be executed after that one, to change the
+      // redirect value to our page.
+      $form['#submit'][] = '_cmf_redirect_to_cmf';
+
+      // The cancel link will have been defined to return to admin/content/node (or admin/content/comment)
+      // so we need to change it here to return to admin/content/filter instead.
+      $form['actions']['cancel']['#value'] = l(t('Cancel'), 'admin/content/filter');
+      break;
+
+    default:
+  }
+}
+
+/**
+ * Additional node deletion 'submit' function.
+ */
+function _cmf_redirect_to_cmf($form, &$form_state) {
+  // Set the final destination after deleting node(s) or comments(s).
+  // Could have used a GOTO here, but safer to set redirect.
+  $form_state['redirect'] = 'admin/content/filter';
+}
+
+/**
+ * 导出到 Excel 实际操作
+ * 
+ * @param type $result 
+ */
+function _cmf_export_operation($form,$result){
+    $header = array();
+    $data = array();
+    define('__PHPEXCEL_PATH__', drupal_get_path('module','custom_excel').'/phpExcel/Classes');
+    foreach($form['header']['#value'] as $key=>$value){ 
+        if(isset($value['field']) && !empty($value['field']))
+        $header[$value['field']] = $value['data'];
+    }
+    $header['url'] = '访问地址';
+    
+    //设置值
+    if($_SESSION['cmf_content_kind']=='node'){
+        foreach ($result as $key => $nid) {
+            $query = "SELECT n.nid, n.title, n.type, n.status, n.created, "
+            ."n.changed, n.promote, n.sticky, n.tnid, "      
+            ."u.name AS username, u.uid, r.body_value body, "
+            ."c.totalcount, "    
+            ."cs.comment_count AS commentcount "     
+            ."FROM {node} n "
+            ."LEFT JOIN {field_data_body} r ON r.entity_id = n.nid "
+            ."INNER JOIN {users} u ON n.uid = u.uid "
+            ."LEFT JOIN {node_counter} c ON c.nid = n.nid "    
+            ."LEFT JOIN {node_comment_statistics} cs ON cs.nid = n.nid "    
+            .'where n.nid='.$nid; 
+            $res = db_query($query)->fetchAll();
+//            print_r($header); exit;
+            if(isset($header['nid']))
+             $data[$key]['nid'] = $res[0]->nid;
+             $data[$key]['title'] = $res[0]->title;
+             $data[$key]['type'] = $res[0]->type;
+             $data[$key]['username'] = $res[0]->username;
+             $data[$key]['created'] = format_date($res[0]->created, 'small');
+              $data[$key]['totalcount'] = isset($res[0]->totalcount) ? $res[0]->totalcount : 0;
+             $data[$key]['commentcount'] = $res[0]->commentcount ? $res[0]->commentcount : 0;
+             $data[$key]['url'] = $GLOBALS['base_url'].'/node/'.$res[0]->nid;
+             
+             $status = array();
+             $status[] = $res[0]->status ? 'published' : 'not published';
+            if ($res[0]->promote) {
+              $status[] = 'promoted';
+            }
+            // >0 allows for sticky-encoded weighting.
+            if ($res[0]->sticky > 0) {
+              $status[] = 'sticky';
+            }
+            $data[$key]['status'] = implode(', ', $status);
+        }  
+              
+    }else if($_SESSION['cmf_content_kind']=='comment'){
+        
+    }else{
+        
+    } 
+    $objPHPExcelc = custom_excel(__PHPEXCEL_PATH__,date('Y-m-d',time()).'心脏在线内容统计报表');
+    $objPHPExcelc->initHead($header)->initData($data);
+
+    $objPHPExcel = $objPHPExcelc->getPhpExcelClass();
+    //获取活动工作表
+    $objActSheet = $objPHPExcel->getActiveSheet(); 
+    //设置大标题
+    $objPHPExcel->setActiveSheetIndex(0)->setCellValueExplicit('A1', date('Y-m-d',time()).'骨科在线内容统计报表', PHPExcel_Cell_DataType::TYPE_STRING);
+    //设置字体  
+    $objStyleA1 = $objActSheet->getStyle('A1'); 
+    $objStyleA1  
+        ->getNumberFormat()  
+        ->setFormatCode(PHPExcel_Style_NumberFormat::FORMAT_NUMBER);  
+    $objFontA1 = $objStyleA1->getFont();  
+    $objFontA1->setName('Courier New');  
+    $objFontA1->setSize(20);  
+    $objFontA1->setBold(true);  
+    $objFontA1->getColor()->setARGB('000000000'); 
+
+    //设置当前活动sheet的名称  
+    $objActSheet->setTitle('骨科在线统计报表'); 
+    //设置宽度
+    $objActSheet->getColumnDimension('A')->setWidth(10);
+    $objActSheet->getColumnDimension('B')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('C')->setWidth(10);
+    $objActSheet->getColumnDimension('D')->setWidth(10);
+    $objActSheet->getColumnDimension('E')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('F')->setAutoSize(true);  
+    $objActSheet->getColumnDimension('G')->setWidth(10);
+    $objActSheet->getColumnDimension('H')->setWidth(10);
+    $objActSheet->getColumnDimension('I')->setAutoSize(true);  
+//  $objActSheet->getColumnDimension('A')->setWidth(15);
+
+    //设置全文剧中对齐
+    $objStyleA5 = $objActSheet->getStyle('A1:I'.(count($data)+2));  
+    $objAlignA5 = $objStyleA5->getAlignment();  
+    $objAlignA5->setHorizontal(PHPExcel_Style_Alignment::HORIZONTAL_CENTER);  
+    $objAlignA5->setVertical(PHPExcel_Style_Alignment::VERTICAL_CENTER);  
+
+    //合并单元格
+    $objActSheet->mergeCells('A1:I1');  
+
+    $objStyleA5 = $objActSheet->getStyle('A1:I1');  
+    //设置填充颜色  
+    $objFillA5 = $objStyleA5->getFill();  
+    $objFillA5->setFillType(PHPExcel_Style_Fill::FILL_SOLID);  
+    $objFillA5->getStartColor()->setARGB('ee299229');
+
+    //设置字体  
+    $objStyleA5 = $objActSheet->getStyle('A2:I2'); 
+    $objStyleA5  
+        ->getNumberFormat()  
+        ->setFormatCode(PHPExcel_Style_NumberFormat::FORMAT_NUMBER);  
+    $objFontA5 = $objStyleA5->getFont();  
+    $objFontA5->setName('Courier New');  
+    $objFontA5->setSize(13);  
+    $objFontA5->setBold(true);  
+//  $objFontA5->setUnderline(PHPExcel_Style_Font::UNDERLINE_SINGLE);  
+    $objFontA5->getColor()->setARGB('000000000');  
+    //取出
+    $objPHPExcelc->execute(); exit;
+}
+
+/**
+ * check is not have type filter (if have add drag to table)
+ * @param $type
+ * @param $
+ */
+function _check_have_type($type=''){
+  return true;
+  // if(isset($_SESSION['cmf_overview_filter']) && !empty($_SESSION['cmf_overview_filter'])){
+  //   foreach ($_SESSION['cmf_overview_filter'] as $key => $value) {
+  //     if($value[0]==$type){
+  //       return true;
+  //     }
+  //   }
+  //   return false;
+  // }else{
+  //   return false;
+  // } 
+}
+
+/**
+ * 判断是否加上自定义条件
+ */
+function _check_have_type_for_filter($type=array()){
+  if(isset($_SESSION['cmf_overview_filter']) && !empty($_SESSION['cmf_overview_filter'])){
+    foreach ($_SESSION['cmf_overview_filter'] as $key => $value) {
+      if(in_array($value[0],$type)){
+        return true;
+      }
+    }
+    return false;
+  }else{
+    return false;
+  } 
+}
+
+function _check_upload_address($type,$nid){
+  $availablearr = array('case_case','case_discuss','operation','animation','e_book','guide','images_library','medicate','source_ppt','summarize');
+  if(in_array($type, $availablearr)){
+    $tid = db_query('select field_upload_address_tid tid from {field_data_field_upload_address} where entity_id='.$nid)->fetchField();
+    if($tid==476){
+      return false;
+    }if(empty($tid)){
+      return true;
+    }else{
+      return true;
+    }
+  }else{
+    return true;
+  }
+}
+
+//根据当前用户判断该用户可以查看哪些内容类型的数据
+function _get_access_content_type(){
+  $content_type = variable_get('cmf_cc_settings');
+  //或拥有管理内容权限
+  if (user_access('bypass node access')) {
+    // There are no content types defined that the user has permission to create,
+    // but the user does have the permission to administer the content types, so
+    // grant them access to the page anyway.
+    return $content_type;
+  }
+
+  //查找比较
+  $accessarr = array();
+  foreach ($content_type as $type) {
+    if (node_hook($type, 'form') && node_access('create', $type)) {
+      $accessarr[$type] = $type;
+    }
+  }
+  return $accessarr;
+} 
+
+function ope_nodes($nodes){
+  // dpm($nodes);
+  // if(){
+    
+  // }
+}
+
+function wjcPrint($a){
+    echo "<pre>";
+    print_r($a); exit;
+}
+
+
