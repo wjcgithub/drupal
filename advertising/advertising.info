@@ -1,0 +1,14 @@
+name  = advertising
+description = this is a advertising manage, this is achieved through entity of drupal
+core = 7.x
+
+dependencies[] = entity 
+dependencies[] = views
+
+files[] = advertising.admin.inc
+files[] = advertising_type.admin.inc
+files[] = views/advertising.views.inc
+files[] = views/advertising_handler_link_field.inc
+files[] = views/advertising_handler_delete_link_field.inc
+files[] = views/advertising_handler_edit_link_field.inc
+files[] = views/advertising_handler_advertising_operations_field.inc

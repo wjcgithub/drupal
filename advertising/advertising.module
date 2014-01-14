@@ -1,0 +1,463 @@
+<?php
+function advertising_entity_info(){
+  $return['advertising'] = array(
+    'label' => t('advertising'),
+    // The entity class and controller class extend the classes provided by the
+    // Entity API
+    'entity class' => 'Advertising',
+    'controller class' => 'AdvertisingController',
+    'base table' => 'advertising',
+    'fieldable' => TRUE,
+    'entity keys' => array(
+        'id' => 'advertising_id',
+        'bundle' => 'type',
+    ),
+    // Bundles are defined by the advertising types below
+    'bundles' => array(),
+    // Bundle keys tell the FieldAPI how to extract information from the bundle objects
+    'bundle keys' => array(
+      'bundle' => 'type',
+    ),
+    'label callback' => 'entity_class_label',
+    'uri callback' => 'entity_class_uri',
+    'creation callback' => 'advertising_create',
+    'access callback' => 'advertising_access',
+    'module' => 'advertising',
+    // The information below is used by the advertisingUIController (which extends the EntityDefaultUIController)
+    'admin ui' => array(
+      'path' => 'admin/content/advertisings',
+      'file' => 'advertising.admin.inc',
+      'controller class' => 'AdvertisingUIController',
+      'menu wildcard' => '%advertising',
+    ),
+  );
+  // The entity that holds information about the entity types   
+  $return['advertising_type'] = array(
+    'label' => t('advertising Type'),
+    'entity class' => 'AdvertisingType',
+    'controller class' => 'AdvertisingTypeController',
+    'base table' => 'advertising_type',
+    'fieldable' => FALSE,
+    'bundle of' => 'advertising',
+    'exportable' => TRUE,
+    'entity keys' => array(
+      'id' => 'id',
+      'name' => 'type',
+      'label' => 'label',
+    ),
+    'access callback' => 'advertising_type_access',
+    'module' => 'advertising',
+    // Enable the entity API's admin UI.
+    'admin ui' => array(
+      'path' => 'admin/structure/advertising_types',
+      'file' => 'advertising_type.admin.inc',
+      'controller class' => 'AdvertisingTypeUIController',
+    ),
+  );
+
+  return $return;
+}
+
+/**
+ * Implements hook_entity_info_alter().
+ *
+ * We are adding the info about the advertising types via a hook to avoid a recursion
+ * issue as loading the advertising types requires the entity info as well.
+ *
+ * @todo This needs to be improved
+ */
+function advertising_entity_info_alter(&$entity_info) {
+  foreach (advertising_get_types() as $type => $info) {
+    $entity_info['advertising']['bundles'][$type] = array(
+      'label' => $info->label,
+      'admin' => array(
+        'path' => 'admin/structure/advertising_types/manage/%advertising_type',
+        'real path' => 'admin/structure/advertising_types/manage/' . $type,
+        'bundle argument' => 4,
+        'access arguments' => array('administer advertising types'),
+      ),
+    );
+  }
+}
+
+/**
+ * Implements hook_permission().
+ */
+function advertising_permission() {
+  // We set up permisssions to manage entity types, manage all entities and the
+  // permissions for each individual entity
+  $permissions = array(
+    'administer advertising types' => array(
+      'title' => t('Administer advertising types'),
+      'description' => t('Create and delete fields for advertising types, and set their permissions.'),
+    ),
+    'administer advertisings' => array(
+      'title' => t('Administer advertisings'),
+      'description' => t('Edit and delete alladvertisings'),
+    ),  
+  );
+  
+  //Generate permissions per advertising 
+  foreach (advertising_get_types() as $type) {
+    $type_name = check_plain($type->type);
+    $permissions += array(
+      "edit any $type_name advertising" => array(
+        'title' => t('%type_name: Edit any advertising', array('%type_name' => $type->label)),
+      ),
+      "view any $type_name advertising" => array(
+        'title' => t('%type_name: View any advertising', array('%type_name' => $type->label)),
+      ),
+    );
+  }
+  return $permissions;  
+}
+
+/**
+ * Determines whether the given user has access to a advertising.
+ *
+ * @param $op
+ *   The operation being performed. One of 'view', 'update', 'create', 'delete'
+ *   or just 'edit' (being the same as 'create' or 'update').
+ * @param $advertising
+ *   Optionally a advertising or a advertising type to check access for. If nothing is
+ *   given, access for all advertisings is determined.
+ * @param $account
+ *   The user to check for. Leave it to NULL to check for the global user.
+ * @return boolean
+ *   Whether access is allowed or not.
+ */
+function advertising_access($op, $advertising = NULL, $account = NULL) {
+  if (user_access('administer advertisings', $account)) {
+    return TRUE;
+  }
+  if (isset($advertising) && $type_name = $advertising->type) {
+    $op = ($op == 'view') ? 'view' : 'edit';
+    if (user_access("$op any $type_name advertising", $account)) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Access callback for the entity API.
+ */
+function advertising_type_access($op, $type = NULL, $account = NULL) {
+  return user_access('administer advertising types', $account);
+}
+
+/**
+ * Gets an array of all advertising types, keyed by the type name.
+ *
+ * @param $type_name
+ *   If set, the type with the given name is returned.
+ * @return advertisingType[]
+ *   Depending whether $type isset, an array of advertising types or a single one.
+ */
+function advertising_get_types($type_name = NULL) {
+  // entity_load will get the Entity controller for our advertising entity and call the load
+  // function of that object - we are loading entities by name here.
+  $types = entity_load_multiple_by_name('advertising_type', isset($type_name) ? array($type_name) : FALSE);
+  return isset($type_name) ? reset($types) : $types;
+}
+
+
+/**
+ * Menu argument loader; Load a advertising type by string.
+ *
+ * @param $type
+ *   The machine-readable name of a advertising type to load.
+ * @return
+ *   A advertising type array or FALSE if $type does not exist.
+ */
+function advertising_type_load($type) {
+  return advertising_get_types($type);
+}
+
+
+/**
+ * Fetch a advertising object. Make sure that the wildcard you choose 
+ * in the advertising entity definition fits the function name here.
+ *
+ * @param $advertising_id
+ *   Integer specifying the advertising id.
+ * @param $reset
+ *   A boolean indicating that the internal cache should be reset.
+ * @return
+ *   A fully-loaded $advertising object or FALSE if it cannot be loaded.
+ *
+ * @see advertising_load_multiple()
+ */
+function advertising_load($advertising_id, $reset = FALSE) {
+  $advertisings = advertising_load_multiple(array($advertising_id), array(), $reset);
+  return reset($advertisings);
+}
+
+
+/**
+ * Load multiple advertisings based on certain conditions.
+ *
+ * @param $advertising_ids
+ *   An array of advertising IDs.
+ * @param $conditions
+ *   An array of conditions to match against the {advertising} table.
+ * @param $reset
+ *   A boolean indicating that the internal cache should be reset.
+ * @return
+ *   An array of advertising objects, indexed by advertising_id.
+ *
+ * @see entity_load()
+ * @see advertising_load()
+ */
+function advertising_load_multiple($advertising_ids = array(), $conditions = array(), $reset = FALSE) {
+  return entity_load('advertising', $advertising_ids, $conditions, $reset);
+}
+
+/**
+ * Deletes a advertising.
+ */
+function advertising_delete(advertising $advertising) {
+  $advertising->delete();
+}
+
+
+/**
+ * Delete multiple advertisings.
+ *
+ * @param $advertising_ids
+ *   An array of advertising IDs.
+ */
+function advertising_delete_multiple(array $advertising_ids) {
+  entity_get_controller('advertising')->delete($advertising_ids);
+}
+
+
+/**
+ * Create a advertising object.
+ */
+function advertising_create($values = array()) {
+  return entity_get_controller('advertising')->create($values);
+}
+
+/**
+ * Saves a advertising to the database.
+ *
+ * @param $advertising
+ *   The advertising object.
+ */
+function advertising_save(Advertising $advertising) {
+  return $advertising->save();
+}
+
+
+/**
+ * Saves a advertising type to the db.
+ */
+function advertising_type_save(AdvertisingType $type) {
+  $type->save();
+}
+
+
+/**
+ * Deletes a advertising type from the db.
+ */
+function advertising_type_delete(AdvertisingType $type) {
+  $type->delete();
+}
+
+
+/**
+ * URI callback for advertisings
+ */
+function advertising_uri(Advertising $advertising){
+  return array(
+    'path' => 'advertising/' . $advertising->advertising_id,
+  );
+}
+
+
+/**
+ * Menu title callback for showing individual entities
+ */
+function advertising_page_title(Advertising $advertising){
+  return $advertising->name;
+}
+
+
+/**
+ * Sets up content to show an individual advertising
+ * @todo - get rid of drupal_set_title();
+ */
+function advertising_page_view($advertising, $view_mode = 'full') {    
+  $controller = entity_get_controller('advertising');  
+  $content = $controller->view(array($advertising->advertising_id => $advertising));
+  drupal_set_title($advertising->name);
+  return $content;
+}
+
+
+/**
+ * Implements hook_views_api().
+ */
+function advertising_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'advertising') . '/views',
+  );
+}
+
+/**
+ * Implement hook_theme().
+ */
+function advertising_theme() {
+  return array(
+    'advertising_add_list' => array(
+      'variables' => array('content' => array()),
+      'file' => 'advertising.admin.inc',
+    ),
+    'advertising' => array(
+      'render element' => 'elements',
+      'template' => 'advertising',
+    ),
+   'advertising_sample_data' => array(
+      'variables' => array('advertising_sample_data', 'advertising' => NULL),
+      'template' => 'advertising-sample-data',
+    ),
+
+
+  );
+}  
+
+
+/**
+ * Implements hook_menu_local_tasks_alter().
+ */
+function advertising_menu_local_tasks_alter(&$data, $router_item, $root_path) {
+  // Add action link 'admin/structure/advertisings/add' on 'admin/structure/advertisings'.
+  if ($root_path == 'admin/content/advertisings') {
+    $item = menu_get_item('admin/content/advertisings/add');
+    if ($item['access']) {
+      $data['actions']['output'][] = array(
+        '#theme' => 'menu_local_action',
+        '#link' => $item,
+      );
+    }
+  }
+}
+
+
+/**
+ * The class used for advertising entities
+ */
+class Advertising extends Entity {
+  
+  public function __construct($values = array()) {
+    parent::__construct($values, 'advertising');
+  }
+
+  protected function defaultLabel() {
+    return $this->name;
+  }
+
+  protected function defaultUri() {
+    return array('path' => 'advertising/' . $this->advertising_id);
+  }
+  
+}
+
+/**
+ * The class used for advertising type entities
+ */
+class AdvertisingType extends Entity {
+  
+  public $type;
+  public $label;
+  
+  public function __construct($values = array()) {
+    parent::__construct($values, 'advertising_type');
+  }
+  
+}
+
+
+/**
+ * The Controller for advertising entities
+ */
+class AdvertisingController extends EntityAPIController {
+  public function __construct($entityType) {
+    parent::__construct($entityType);
+  }
+
+
+  /**
+   * Create a advertising - we first set up the values that are specific
+   * to our advertising schema but then also go through the EntityAPIController
+   * function.
+   * 
+   * @param $type
+   *   The machine-readable type of the advertising.
+   *
+   * @return
+   *   A advertising object with all default fields initialized.
+   */
+  public function create(array $values = array()) {
+    // Add values that are specific to our advertising
+    $values += array( 
+      'advertising_id' => '',
+      'is_new' => TRUE,
+      'title' => '',
+      'created' => '',
+      'changed' => '',
+      'data' => '',
+    );
+    
+    $advertising = parent::create($values);
+    return $advertising;
+  }
+  
+  /**
+   * Overriding the buldContent function to add entity specific fields
+   */
+  public function buildContent($entity, $view_mode = 'full', $langcode = NULL, $content = array()) {
+    $content = parent::buildContent($entity, $view_mode, $langcode, $content);
+    $content['advertising_sample_data'] =  array(
+      '#markup' => theme('advertising_sample_data', array('advertising_sample_data' => check_plain($entity->data['sample_data']), 'advertising' => $entity)),
+    );
+
+    return $content;
+  }
+  
+}
+
+
+/**
+ * The Controller for advertising entities
+ */
+class AdvertisingTypeController extends EntityAPIControllerExportable {
+  public function __construct($entityType) {
+    parent::__construct($entityType);
+  }
+  
+   /**
+   * Create a advertising type - we first set up the values that are specific
+   * to our advertising type schema but then also go through the EntityAPIController
+   * function.
+   * 
+   * @param $type
+   *   The machine-readable type of the advertising.
+   *
+   * @return
+   *   A advertising type object with all default fields initialized.
+   */
+  public function create(array $values = array()) {
+    // Add values that are specific to our advertising
+    $values += array( 
+      'id' => '',
+      'is_new' => TRUE,
+      'data' => '',
+    );
+    $advertising_type = parent::create($values);
+    return $advertising_type;
+  }
+
+}

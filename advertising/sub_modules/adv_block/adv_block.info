@@ -1,0 +1,6 @@
+name  = advertising list
+description = this is a advertising block list pages, this is achieved through entity of drupal
+core = 7.x
+dependencies[] = advertising 
+
+files[] = adv_block.admin.inc

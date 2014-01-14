@@ -1,0 +1,65 @@
+<?php
+
+/**
+ * Implements hook_menu()
+ */
+function adv_block_menu(){
+  $items = array();
+  $items['admin/config/user-interface/adv_block_setting'] = array(
+    'title' => '广告位配置',
+    'description' => '广告位配置',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('advertising_settings'),
+    'access arguments' => array('administer or_chart'),
+    'file' => 'adv_block.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+function _get_adv_list(){
+  $resarr = db_query('select advertising_id from {advertising} where type = :type',array(':type'=>variable_get('advertising_content_type')))->fetchAll();
+  return $resarr;
+}
+
+function _adv_get_img_style(){
+  $styles = array();
+  foreach (image_styles() as $key => $val) {
+    $styles[$key] = $key;
+  }
+  return $styles;
+}
+
+function _generation_adv_img_str($advid){
+  $advinfo = entity_load('advertising',array($advid));
+  $uri = $advinfo[$advid]->field_adv_img['und'][0]['uri'];
+  $style = $advinfo[$advid]->field_adv_img_style['und'][0]['value'];
+  $alt = $advinfo[$advid]->field_adv_img['und'][0]['alt'];
+  $title = $advinfo[$advid]->field_adv_img['und'][0]['title'];
+  $link = $advinfo[$advid]->field_adv_link['und'][0]['safe_value'];
+  $imgstr = theme('image_style',  
+    array('style_name' => $style,
+      'path' => $uri,
+      'alt' => $alt,
+      'title' =>$title,
+    )
+  );
+  return '<a href="'.$link.'" target="_blank">'.$imgstr.'</a>';
+}
+
+function _generation_adv_img_link($advid){
+  $advid = variable_get('advertising_front_top');
+  $advinfo = entity_load('advertising',array($advid)); dpm($advinfo);
+  $uri = $advinfo[$advid]->field_adv_img['und'][0]['uri'];
+  $style = $advinfo[$advid]->field_adv_img_style['und'][0]['value'];
+  $alt = $advinfo[$advid]->field_adv_img['und'][0]['alt'];
+  $title = $advinfo[$advid]->field_adv_img['und'][0]['title'];
+  $link = $advinfo[$advid]->field_adv_link['und'][0]['safe_value'];
+  return array(
+      'img' => image_style_url($style,$uri),
+      'link' => $link,
+      'alt' => $alt,
+      'title' => $title,
+    );
+}

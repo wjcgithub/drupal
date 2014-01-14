@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the 广告位视图 feature.
+ */
+
+include_once 'advertising_custom_views.features.inc';

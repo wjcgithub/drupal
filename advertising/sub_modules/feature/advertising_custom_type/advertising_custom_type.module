@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the 广告位类型 feature.
+ */
+
+include_once 'advertising_custom_type.features.inc';
