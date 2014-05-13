@@ -1,0 +1,5 @@
+name = "advanced comment"
+description = "advanced comments manage"
+package = "heart"
+core = "7.x"
+dependencies[] = cmf
