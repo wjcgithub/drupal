@@ -1,0 +1,6 @@
+name = node content pager
+description = node content pager
+package = custom
+core = 7.x
+files[] = ncp.module
+files[] = ncp.class.pager.inc
