@@ -1,0 +1,145 @@
+<?php
+/**
+ * [show_pdf_menu description]
+ * @return [type] [description]
+ */
+function show_pdf_menu(){
+  $items = array();
+  $items['admin/config/user-interface/showpdf'] = array(
+    'title' => t('settings pdf info'),
+    'description' => t('settings pdf info'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('show_pdf_settings_form'),
+    'access arguments' => array('show_pdf_settings'),
+    'file' => 'show_pdf.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items; 
+}
+
+/**
+ * [show_pdf_permission description]
+ * @return [type] [description]
+ */
+function show_pdf_permission(){
+  return array(
+    'show_pdf_settings' => array(
+      'title' => t('administrator show pdf settings info'),
+      'description' => t('administrator show pdf settings info'),
+    ),
+  );
+}
+
+/**
+ * [show_pdf_field_storage_pre_update description]
+ * @param  [type] $entity_type [description]
+ * @param  [type] $entity      [description]
+ * @param  [type] $skip_fields [description]
+ * @return [type]              [description]
+ */
+function show_pdf_field_storage_pre_update($entity_type, $entity, &$skip_fields) {
+  if($entity_type=='node' && _show_pdf_is_not_define_bundle($entity->type))
+  _show_pdf_general_one_swf($entity);
+}
+
+/**
+ * [show_pdf_field_storage_pre_insert description]
+ * @param  [type] $entity_type [description]
+ * @param  [type] $entity      [description]
+ * @param  [type] $skip_fields [description]
+ * @return [type]              [description]
+ */
+function show_pdf_field_storage_pre_insert($entity_type, $entity, &$skip_fields){
+  if($entity_type=='node' && _show_pdf_is_not_define_bundle($entity->type))
+  _show_pdf_general_one_swf($entity);
+}
+
+/**
+ * [_show_pdf_is_not_define_bundle description]
+ * @param  [type] $type [description]
+ * @return [type]       [description]
+ */
+function _show_pdf_is_not_define_bundle($type){
+  $settings = show_pdf_settings();
+  $bundlearr = explode("\r\n", $settings['pdf2swf_bundle']);
+  if(in_array($type, $bundlearr)){
+    return true;
+  }else{
+    return false;
+  }
+}
+
+/**
+ * [_show_pdf_general_one_swf description]
+ * @param  [type] $entity [description]
+ * @return [type]         [description]
+ */
+function _show_pdf_general_one_swf($entity){
+  $settings = show_pdf_settings();
+  $bundlearr = explode("\r\n", $settings['pdf2swf_bundle']);
+  $fieldarr = explode("\r\n", $settings['pdf2swf_field']);
+  if(in_array($entity->type, $bundlearr)){
+    $newbundle = array_flip($bundlearr);
+    $fieldkey = $newbundle[$entity->type];
+  }
+  $field = trim($fieldarr[$fieldkey]);
+  $newentity = $entity->$field;
+  if(isset($newentity['und'][0]['fid']) && is_numeric($newentity['und'][0]['fid'])){
+    $fid = $newentity['und'][0]['fid'];
+    $file = file_load($fid);
+    if ($file->filemime == 'application/pdf') {
+        $files_directory = _show_pdf_get_files_folder_path($file);
+        $files_arr = scandir(drupal_realpath($files_directory));
+        $files_directory_info = & drupal_static('show_pdf_files_directory_info');
+        $files_directory_info[$fid] = $files_arr;
+        if (!in_array($file->filename . '.swf', $files_arr)) {
+        $folder_url = file_create_url(_show_pdf_get_files_folder_path($file));
+        $pdf_path = drupal_realpath($file->uri);
+        $files_directory = drupal_realpath(_show_pdf_get_files_folder_path($file));
+        if($settings['swf_size']=='storeallcharacters'){
+          $command = 'pdf2swf -o "'.$files_directory.'/'.$file->fid.'.swf" -f -T 9 -t -s storeallcharacters '.$pdf_path;
+        }else{
+          $command = 'pdf2swf -o "'.$files_directory.'/'.$file->filename.'.swf" -f -T 9 -t -s bitmap '.$pdf_path;
+        }
+        $res = shell_exec($command);
+        }
+    } 
+  }
+}
+
+/**
+ * [show_pdf_file_delete description]
+ * @param  [type] $file [description]
+ * @return [type]       [description]
+ */
+function show_pdf_file_delete($file) {
+  // We should delete all flexpaper files.
+  $files_directory = _show_pdf_get_files_folder_path($file);
+  if (file_prepare_directory($files_directory)) {
+    file_unmanaged_delete_recursive($files_directory);
+  }
+}
+
+/**
+ * [_show_pdf_get_files_folder_path description]
+ * @param  [type] $file [description]
+ * @return [type]       [description]
+ */
+function _show_pdf_get_files_folder_path($file) {
+  $dir = file_default_scheme() . '://flexpaper/' . $file->fid . '_files';
+  if(!is_dir($dir)){
+    file_prepare_directory($dir, FILE_CREATE_DIRECTORY);
+  }
+  return $dir;
+}
+
+/**
+ * [show_pdf_settings description]
+ * @return [type] [description]
+ */
+function show_pdf_settings(){
+  $settings = unserialize(variable_get('show_pdf_settings'));
+  return $settings;
+}
+

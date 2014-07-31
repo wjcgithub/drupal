@@ -1,6 +1,0 @@
-<?php
-function cmf_heart_bottom_link_uninstall(){
-	variable_del('cmf_heart_bottom_link_roles');
-	variable_del('cmf_heart_bottom_link_sup_until');
-	variable_del('cmf_heart_bottom_link_friend_link');
-}

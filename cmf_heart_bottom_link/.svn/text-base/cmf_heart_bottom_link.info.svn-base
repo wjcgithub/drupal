@@ -1,8 +1,0 @@
-name = "heart bottom link management filter"
-description = "cmf heart bottom link"
-package = heart
-core = 7.x
-dependencies[] = cmf_base
-files[] = cmf_column.inc
-
-configration admin/config/user-interface/cmf_columns

@@ -1,0 +1,7 @@
+name = show pdf on the node show
+description = show pdf on the node show use flexpaper
+core = 7.x
+package = Custom
+
+configure = admin/config/user-interface/showpdf
+dependencies[] = flexpaper 
