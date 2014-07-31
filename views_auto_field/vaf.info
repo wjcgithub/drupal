@@ -1,0 +1,7 @@
+name = views auto field
+description  = custom views operation field use ctools modal
+core = 7.x
+package = custom
+dependencies[] = views
+dependencies[] = cdialog
+files[] = views/vaf_operation.inc

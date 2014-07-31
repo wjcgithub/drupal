@@ -1,0 +1,110 @@
+<?php
+/**
+ * [vaf_menu description]
+ * @return [type] [description]
+ */
+function vaf_menu(){
+	$iterms = array();
+	$items['admin/vaf/auditing/%/%/%/%/%ctools_js/approve'] = array(
+	    'title' => '审核信息',
+	    'description' => '审核信息',
+	    'page callback' => '_vaf_info_auditing',
+	    //3->entity_type 4->bundle  5->field  6->nid  7->ajax/no 
+	    'page arguments' => array(3,4,5,6,7),
+	    'access arguments' => array('_vaf_info_auditing'),
+	    'file' => 'vaf.auditing.inc',
+	    'type' => MENU_CALLBACK,
+	  );
+  return $items;
+}
+
+/**
+ * [vaf_permission description]
+ * @return [type] [description]
+ */
+function vaf_permission(){
+	return array(
+		'_vaf_info_auditing' => array(
+			'title' => t('_vaf_info_auditing'),
+			'description' => t('审核操作')
+		),
+	);
+}
+
+/**
+ * [vaf_views_api description]
+ * @return [type] [description]
+ */
+function vaf_views_api(){
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module','vaf').'/views'
+  );
+}
+
+/**
+ * [_get_all_entity_field description]
+ * @return [type] [description]
+ */
+function _get_all_entity_field(){
+	$arr = array();
+	foreach (node_type_get_names() as $key => $value) {
+		$arr[$value] = _get_field_list('node',$key);
+	}
+	return $arr;
+}
+
+/**
+ * [_get_field_list description]
+ * @param  [type] $entity_type [description]
+ * @param  [type] $bundle      [description]
+ * @return [type]              [description]
+ */
+function _get_field_list($entity_type, $bundle){	
+	$arr = array();
+	$flist = field_info_instances($entity_type, $bundle);
+	foreach ($flist as $key => $field) {
+		$arr[$bundle.'<>'.$field['field_name']] = $field['label'];
+	}
+	return $arr;
+}
+
+/**
+ * [_vaf_auditing_form description]
+ * @param  [type] $bundle [description]
+ * @param  [type] $field  [description]
+ * @return [type]         [description]
+ */
+function _vaf_get_auditing_value($entity_type, $bundle,$field){
+	//get field entity info
+    $instance = field_info_instance($entity_type, $field, $bundle);
+    //get field value
+    $fieldval = field_info_field($field);  
+    //显示类型
+    $distype = $instance['display']['default']['type'];
+
+    switch ($distype) {
+    	//选择列表
+    	case 'list_default':
+			$dataarr = $fieldval['settings']['allowed_values'];
+		break;
+
+    	//术语列表
+    	case 'taxonomy_term_reference_link':
+			$vocabularyname = $fieldval['settings']['allowed_values'][0]['vocabulary'];
+			  if ($vocabulary = taxonomy_vocabulary_machine_name_load($vocabularyname)) {
+			    $points_types = array();
+			    foreach (taxonomy_get_tree($vocabulary->vid) as $term) {
+			      $points_types[$term->tid] = $term->name;
+			    };
+			    $dataarr = $points_types;
+			  }
+		break;
+    	
+    	//default
+    	default:
+			$dataarr = array();
+		break;
+    }
+    return $dataarr;
+}
